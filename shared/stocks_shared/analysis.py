@@ -34,7 +34,8 @@ def detect_open_positions(transactions):
                 p["open_date"] = date_str  # record date of first open
             p["contracts"] += q
             p["premium"] += amt
-        elif action in ("Buy to Close", "Sell to Close", "Expired", "Assigned"):
+        elif action in ("Buy to Close", "Sell to Close", "Expired", "Assigned",
+                        "Exercised"):
             p["contracts"] -= q
             p["premium"] += amt
             if p["contracts"] == 0:
@@ -142,7 +143,8 @@ def get_last_option(transactions, option_type):
     contracts  = int(last[6])
     premium    = round(float(last[9]), 2) if last[9] != "" else 0.0
 
-    _CLOSE_ACTIONS = {"Buy to Close", "Sell to Close", "Expired", "Assigned"}
+    _CLOSE_ACTIONS = {"Buy to Close", "Sell to Close", "Expired", "Assigned",
+                      "Exercised"}
     close_rows = sorted(
         (row[0], row[1]) for row in transactions
         if _norm_opt_symbol(row[3]) == _norm_opt_symbol(symbol)
@@ -164,6 +166,9 @@ def get_last_option(transactions, option_type):
     # Disposition and ITM/OTM at close
     if close_action == "Assigned":
         disposition  = "Assigned"
+        itm_at_close = True
+    elif close_action == "Exercised":
+        disposition  = "Exercised"
         itm_at_close = True
     elif close_action == "Expired":
         disposition  = "Expired"
@@ -317,7 +322,8 @@ def compute_status(transactions, open_positions):
             q = int(qty)
             if action in ("Sell to Open", "Buy to Open"):
                 option_net[key] += q
-            elif action in ("Buy to Close", "Sell to Close", "Expired", "Assigned"):
+            elif action in ("Buy to Close", "Sell to Close", "Expired", "Assigned",
+                            "Exercised"):
                 option_net[key] -= q
                 if option_net[key] < 0:
                     issues.append(f"option contracts went negative for {key}")

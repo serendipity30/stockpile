@@ -21,8 +21,11 @@ def _get_parser(brokerage: str):
         from stocks_shared.parsers.fidelity import parse_all_transactions
     elif b == "merrill":
         from stocks_shared.parsers.merrill import parse_all_transactions
+    elif b == "stockpile":
+        from stocks_shared.parsers.stockpile import parse_all_transactions
     else:
-        sys.exit(f"Unknown brokerage '{brokerage}'. Supported: schwab, robinhood, fidelity, merrill")
+        sys.exit(f"Unknown brokerage '{brokerage}'. "
+                 "Supported: schwab, robinhood, fidelity, merrill, stockpile")
     return parse_all_transactions
 
 

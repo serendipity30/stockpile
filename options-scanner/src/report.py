@@ -354,8 +354,9 @@ def render_portfolio_html(
                 f'&mdash; {opt["contracts"]} contract(s){close_str}</p>'
             )
 
-        if res["error"]:
-            body_html = f'<p style="color:#c0392b">{res["error"]}</p>'
+        if res["error"] or res["spot"] is None or res["df"].empty:
+            msg = res["error"] or "No options data returned."
+            body_html = f'<p style="color:#c0392b">{msg}</p>'
         else:
             spot = res["spot"]
             earnings_dates = res["earnings_dates"]

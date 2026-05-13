@@ -18,8 +18,9 @@ charts, and shared parsing/finance utilities.
 ## Projects
 
 - **shared** — pip-installable package (`stocks-shared`): CSV parsers
-  (Schwab, Robinhood, Fidelity, Merrill Edge), Yahoo Finance helpers,
-  FIFO analysis, Black-Scholes pricing
+  (Schwab, Robinhood, Fidelity, Merrill Edge, and the
+  [stockpile manual format](docs/stockpile-format.md)), Yahoo Finance
+  helpers, FIFO analysis, Black-Scholes pricing
 - **tools** — one-off migration scripts: Schwab→Robinhood CSV
   conversion, Merrill Edge PDF statement extractor
 - **[positions](positions/README.md)** — Google Sheets position tracker

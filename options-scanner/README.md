@@ -30,8 +30,11 @@ A browser tab opens at `http://localhost:8501` with two tabs:
   IV+pp row shading, and a top candidates table ranked across all
   expirations.
 - **Portfolio** — drag in a brokerage CSV (Schwab, Robinhood, Fidelity,
-  or Merrill), pick the brokerage, hit Scan Portfolio. Each position
-  gets its own chart and table in a collapsible section.
+  Merrill, or a hand-written
+  [stockpile file](../docs/stockpile-format.md)), pick the format, hit
+  Scan Portfolio. Each position gets its own chart and table in a
+  collapsible section. The validator runs automatically on upload and
+  shows any problems before you scan.
 
 Both tabs offer a Download HTML Report button.
 

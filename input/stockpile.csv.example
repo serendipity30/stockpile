@@ -1,0 +1,133 @@
+# stockpile.csv.example
+# ──────────────────────────────────────────────────────────────────────
+# Complete example of the stockpile manual transaction format.
+# Every action type is shown. Copy this file to input/my-portfolio.csv
+# and replace these rows with your own transactions.
+#
+# Lines starting with # are comments — ignored by every tool.
+# Blank lines are also ignored.
+#
+# Prices are approximate historical figures as of the transaction date
+# and are for illustration only.
+#
+# SIGN CONVENTION:
+#   amount positive (+) = money you received  (selling, dividends)
+#   amount negative (-) = money you paid      (buying shares or options)
+#
+# price is per share (or per underlying share for options, i.e. multiply
+# by 100 for the value of one contract).
+# If you leave amount blank the tool computes it from price × qty (± fees).
+# ──────────────────────────────────────────────────────────────────────
+
+date,action,symbol,quantity,option_type,strike,expiration,price,fees,amount,description
+
+# ══════════════════════════════════════════════════════════════════════
+# AAPL — 120 shares held; 1 open covered call at $310
+# (AAPL current ~$295)
+# Demonstrates: BUY, DIVIDEND, SELL, STO, EXPIRED, BTC (roll)
+# ══════════════════════════════════════════════════════════════════════
+
+# BUY — purchase shares (you paid, so amount is negative)
+2024-01-15,BUY,AAPL,100,,,,,0.65,-18400.65,Initial position at ~$184
+
+2025-03-01,BUY,AAPL,50,,,,,0.65,-11400.65,Adding at ~$228
+
+# DIVIDEND — total cash received goes in amount; quantity is not needed
+2025-06-01,DIVIDEND,AAPL,,,,,,,30.00,Quarterly dividend
+
+# SELL — partial exit (you received, so amount is positive)
+2025-07-01,SELL,AAPL,30,,,,,0.65,6329.35,Trimming at ~$211
+
+# STO — sell a covered call OTM; premium received = positive amount
+# AAPL was ~$215 when opened; $230 strike is ~7% OTM
+2025-07-15,STO,AAPL,1,CALL,230.00,2025-10-17,3.50,0.65,349.35,Covered call
+
+# EXPIRED — call expires worthless; price = 0, amount = 0
+2025-10-17,EXPIRED,AAPL,1,CALL,230.00,2025-10-17,0.00,0.00,0.00,Expired worthless
+
+# ROLL = two rows on the same day: BTC closes the old leg, STO opens new
+# AAPL ~$255; $275 strike is ~8% OTM
+2026-01-12,STO,AAPL,1,CALL,275.00,2026-06-19,4.20,0.65,419.35,Covered call
+
+# BTC — buy to close (you paid, so amount is negative)
+2026-03-20,BTC,AAPL,1,CALL,275.00,2026-06-19,1.10,0.65,-110.65,Roll — BTC leg
+
+# STO — open the new leg on the same date as the BTC above
+# AAPL ~$280; $310 strike is ~11% OTM — currently open
+2026-03-20,STO,AAPL,1,CALL,310.00,2026-09-18,3.80,0.65,379.35,Roll — new leg (open)
+
+# ══════════════════════════════════════════════════════════════════════
+# TSLA — 100 shares from a put assignment
+# (TSLA current ~$433)
+# Demonstrates: STO (CSP), ASSIGNED (2-row event)
+# ══════════════════════════════════════════════════════════════════════
+
+# STO — sell a cash-secured put; TSLA was ~$380, $320 put is ~16% OTM
+2025-04-01,STO,TSLA,1,PUT,320.00,2025-10-17,6.50,0.65,649.35,Cash-secured put
+
+# ASSIGNED — short put gets assigned at expiration: always two rows.
+# Row 1: close the option at $0
+2025-10-17,ASSIGNED,TSLA,1,PUT,320.00,2025-10-17,0.00,0.00,0.00,Put assigned
+
+# Row 2: record the shares you received (strike × 100 per contract)
+2025-10-17,BUY,TSLA,100,,,,,0.00,-32000.00,Shares from put assignment at $320
+
+# ══════════════════════════════════════════════════════════════════════
+# MSFT — 50 shares; long call bought and sold for a profit
+# (MSFT current ~$408)
+# Demonstrates: BTO (long option), STC
+# ══════════════════════════════════════════════════════════════════════
+
+2024-06-01,BUY,MSFT,50,,,,,0.65,-19400.65,Initial position at ~$388
+
+# BTO — buy a long LEAPS call (you paid, so amount is negative)
+# MSFT ~$395; $430 call is ~9% OTM
+2025-01-15,BTO,MSFT,1,CALL,430.00,2027-01-15,14.50,0.65,-1450.65,Long LEAPS call
+
+# STC — sell to close the long call for a profit (you received)
+2025-11-20,STC,MSFT,1,CALL,430.00,2027-01-15,26.00,0.65,2599.35,Closed for profit
+
+# ══════════════════════════════════════════════════════════════════════
+# AMD — 200 shares acquired by exercising long calls
+# (AMD current ~$448)
+# Demonstrates: BTO (long option), EXERCISED (2-row event)
+# ══════════════════════════════════════════════════════════════════════
+
+# BTO — buy 2 long call contracts; AMD ~$280, $310 call is ~11% OTM
+2025-01-10,BTO,AMD,2,CALL,310.00,2027-01-15,11.80,1.30,-2361.30,Long LEAPS calls
+
+# EXERCISED — exercise a long option: always two rows.
+# Row 1: close the option contracts
+2025-12-05,EXERCISED,AMD,2,CALL,310.00,2027-01-15,0.00,0.00,0.00,Exercised
+
+# Row 2: buy the shares at the strike (2 contracts × 100 shares = 200 shares)
+2025-12-05,BUY,AMD,200,,,,,0.00,-62000.00,Shares from call exercise at $310
+
+# ══════════════════════════════════════════════════════════════════════
+# SPY — protective puts bought then expired worthless
+# (SPY current ~$738)
+# Demonstrates: BTO (long put), EXPIRED (long side)
+# Note: SPY has no shares, so it will NOT appear in the portfolio scan.
+# ══════════════════════════════════════════════════════════════════════
+
+# BTO — buy puts for downside protection; SPY ~$700, $640 put is ~9% OTM
+2025-06-01,BTO,SPY,5,PUT,640.00,2026-01-16,9.80,3.25,-4903.25,Protective puts
+
+# EXPIRED — long puts expire worthless; you lose the premium paid
+2026-01-16,EXPIRED,SPY,5,PUT,640.00,2026-01-16,0.00,0.00,0.00,Puts expired worthless
+
+# ══════════════════════════════════════════════════════════════════════
+# NVDA — transferred in, then split
+# (NVDA current ~$221)
+# Demonstrates: TRANSFER_IN, SPLIT
+# ══════════════════════════════════════════════════════════════════════
+
+# TRANSFER_IN — shares arrived from another broker with no cost basis.
+# Add the original BUY rows if you can find them; the tracker will flag
+# this position as Inconsistent until you do.
+2024-03-01,TRANSFER_IN,NVDA,20,,,,,,,Transferred from old broker (pre-split shares)
+
+# SPLIT — additional shares from NVDA's 10:1 split in June 2024.
+# quantity = number of ADDITIONAL shares (not the new total).
+# 20 shares × 10:1 = 200 total; so 180 additional shares received.
+2024-06-10,SPLIT,NVDA,180,,,,,,,10:1 split — 180 additional shares at $0

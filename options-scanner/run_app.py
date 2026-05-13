@@ -105,6 +105,92 @@ def _apply_theme(theme_name: str) -> None:
 
 # ── Cached data fetching ─────────────────────────────────────────────────────
 
+@st.cache_data(show_spinner=False)
+def _validate_csv(content: bytes, brokerage: str) -> tuple[list, int, str | None]:
+    """Validate an uploaded CSV.
+
+    Returns (issues, row_count, parse_error):
+    - issues:      list of ValidationIssue (stockpile only; [] for other formats)
+    - row_count:   data rows found (stockpile) or positions found (other formats)
+    - parse_error: error string if the other-format parse failed, else None
+    """
+    if brokerage == "stockpile":
+        from stocks_shared.validators import validate_stockpile_csv, count_data_rows
+        text = content.decode("utf-8-sig")
+        return validate_stockpile_csv(text), count_data_rows(text), None
+
+    # For brokerage formats: attempt a parse and report positions found
+    import os, tempfile
+    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        from portfolio import get_portfolio
+        positions = get_portfolio(tmp_path, brokerage)
+        return [], len(positions), None
+    except Exception as exc:
+        return [], 0, str(exc)
+    finally:
+        os.unlink(tmp_path)
+
+
+def _show_validation(issues: list, row_count: int, parse_error: str | None,
+                     brokerage: str) -> bool:
+    """Render the validation panel.  Returns True if the file is scan-ready."""
+    if parse_error:
+        st.error(f"Could not parse CSV: {parse_error}")
+        return False
+
+    if brokerage != "stockpile":
+        noun = "position" if row_count == 1 else "positions"
+        st.success(f"Parsed successfully — {row_count} open {noun} found.")
+        return True
+
+    errors   = [i for i in issues if i.severity == "error"]
+    warnings = [i for i in issues if i.severity == "warning"]
+
+    if not issues:
+        st.success(f"Valid — {row_count} rows, no issues found.")
+        return True
+
+    parts = []
+    if errors:
+        parts.append(f"{len(errors)} error{'s' if len(errors) != 1 else ''}")
+    if warnings:
+        parts.append(f"{len(warnings)} warning{'s' if len(warnings) != 1 else ''}")
+    summary = f"{row_count} rows — {', '.join(parts)}"
+
+    if errors:
+        st.error(summary)
+    else:
+        st.warning(summary)
+
+    with st.expander("Show issues", expanded=bool(errors)):
+        import pandas as pd
+        df = pd.DataFrame([
+            {
+                "Row":     str(i.row) if i.row > 0 else "—",
+                "Field":   i.field or "—",
+                "Level":   i.severity.upper(),
+                "Message": i.message,
+            }
+            for i in issues
+        ])
+
+        def _row_style(row):
+            color = (
+                "background-color: rgba(239,68,68,0.18)"
+                if row["Level"] == "ERROR"
+                else "background-color: rgba(234,179,8,0.22)"
+            )
+            return [color] * len(row)
+
+        styled = df.style.apply(_row_style, axis=1)
+        st.dataframe(styled, hide_index=True, width="stretch")
+
+    return not errors
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _fetch_and_enrich(ticker: str, opt_type: str, min_dte: int,
                       max_dte: int | None):
@@ -236,7 +322,7 @@ def _show_df(sub: pd.DataFrame, roll_close_cost: float | None = None,
                                                          width="small")
 
     st.dataframe(styled, column_config=col_cfg, hide_index=True,
-                 use_container_width=True)
+                 width="stretch")
 
 
 def _show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
@@ -541,7 +627,7 @@ def _show_chain_table(df_exp: pd.DataFrame, buy: bool, mode: str,
                                                          format="$%+.2f",
                                                          width="small")
     st.dataframe(styled, column_config=col_cfg, hide_index=True,
-                 use_container_width=True)
+                 width="stretch")
 
 
 def _show_scan_results(df: pd.DataFrame, mode: str, buy: bool,
@@ -820,23 +906,52 @@ def _tab_portfolio() -> None:
     pc1, pc2, pc3, pc4, pc5 = st.columns(5)
     with pc1:
         brokerage = st.selectbox(
-            "Brokerage", ["schwab", "robinhood", "fidelity", "merrill"]
+            "Format",
+            ["schwab", "robinhood", "fidelity", "merrill", "stockpile"],
+            index=None,
+            placeholder="Select format…",
+            help="Select your brokerage export format, or 'stockpile' for a "
+                 "manually-entered transaction log.",
         )
     with pc2:
-        port_min_dte = st.number_input("Min DTE", value=365, min_value=1,
+        port_min_dte = st.number_input("Min DTE", value=30, min_value=1,
                                        key="p_min_dte")
     with pc3:
         port_min_oi = st.number_input("Min OI", value=25, min_value=0,
                                       key="p_min_oi")
     with pc4:
-        port_max_delta = st.slider("Max Delta", 0.0, 1.0, 0.70, 0.05,
-                                   key="p_max_delta")
+        port_delta_range = st.slider("Delta Range", 0.0, 1.0, (0.10, 0.70),
+                                     0.05, key="p_delta")
     with pc5:
         port_top = st.number_input("Top N per ticker", value=5, min_value=1,
                                    key="p_top")
 
+    # ── Validation (auto-runs whenever a file and format are both set) ──────────
+    scan_ready = False
+    if uploaded is not None and brokerage is not None:
+        with st.container(border=True):
+            st.caption(
+                f"**Validation** — {uploaded.name}"
+                + (" (stockpile format)" if brokerage == "stockpile" else "")
+            )
+            issues, row_count, parse_error = _validate_csv(
+                uploaded.getvalue(), brokerage
+            )
+            scan_ready = _show_validation(
+                issues, row_count, parse_error, brokerage
+            )
+
+            if brokerage == "stockpile":
+                st.caption(
+                    "See the README for the full format spec and an example "
+                    "row for every transaction type (BUY, SELL, STO, BTO, "
+                    "STC, BTC, EXPIRED, ASSIGNED, EXERCISED, DIVIDEND, "
+                    "SPLIT, TRANSFER_IN)."
+                )
+
     if not st.button("Scan Portfolio", type="primary",
-                     disabled=(uploaded is None)):
+                     disabled=(uploaded is None or brokerage is None
+                               or not scan_ready)):
         return
 
     from portfolio import get_portfolio
@@ -914,6 +1029,11 @@ def _tab_portfolio() -> None:
             earnings_dates = res["earnings_dates"]
             df             = res["df"]
 
+            if spot is None or df.empty:
+                st.warning("No options data returned — Yahoo may be "
+                           "throttling. Try again in a moment.")
+                continue
+
             m1, m2 = st.columns(2)
             m1.metric("Spot", f"${spot:.2f}")
             m2.metric("Next Earnings",
@@ -931,7 +1051,9 @@ def _tab_portfolio() -> None:
                 first = pos["open_calls"][0]
                 roll_close = res["roll_close_costs"].get(first["symbol"])
 
-            df_filt = df[df["delta"].abs() <= port_max_delta].copy()
+            port_delta_min, port_delta_max = port_delta_range
+            df_filt = df[df["delta"].abs().between(
+                port_delta_min, port_delta_max)].copy()
 
             _show_iv_chart(df_filt, spot, "call",
                            int(port_min_oi), int(port_top), False,
