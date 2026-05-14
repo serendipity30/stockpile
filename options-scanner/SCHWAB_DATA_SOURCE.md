@@ -6,7 +6,7 @@ The options scanner supports two data sources:
 
 - **Yahoo Finance** (default) — no setup required, uses `yfinance`
 - **Schwab** — real-time quotes, actual Greeks, full chain coverage;
-  requires a free Schwab developer API account
+  requires a Schwab account and a free Schwab developer API account
 
 ## How to configure Schwab
 
