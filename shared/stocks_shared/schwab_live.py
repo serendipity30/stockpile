@@ -8,6 +8,26 @@ import pandas as pd
 
 log = logging.getLogger(__name__)
 
+# Schwab uses $NAME for cash-settled index options.
+_SCHWAB_INDEX_TICKERS = frozenset({
+    "SPX", "SPXW", "NDX", "NDXP", "RUT",
+    "VIX", "DJI", "OEX", "XEO", "VXN", "RVX",
+})
+
+
+def normalize_ticker_schwab(ticker: str) -> str:
+    """Prepend $ for index tickers that Schwab lists under $NAME.
+
+    Trailing ! disables normalization — the bare symbol is used as-is.
+    """
+    t = ticker.strip().upper()
+    if t.endswith("!"):
+        return t[:-1]
+    t = t.lstrip("^$")
+    if t in _SCHWAB_INDEX_TICKERS:
+        return f"${t}"
+    return t
+
 _client_cache: dict = {}
 
 
@@ -54,6 +74,7 @@ def get_client(app_key: str, app_secret: str, callback_url: str,
 def fetch_live_price_schwab(client, ticker: str) -> float | None:
     """Return live mark price for ticker, or None on error."""
     try:
+        ticker = normalize_ticker_schwab(ticker)
         resp = client.get_quote(ticker)
         resp.raise_for_status()
         data = resp.json()
@@ -74,6 +95,7 @@ def fetch_option_chain_raw(client, ticker: str, min_dte: int,
     import datetime
     from schwab.client import Client
 
+    ticker = normalize_ticker_schwab(ticker)
     today = datetime.date.today()
     from_date = today + datetime.timedelta(days=min_dte)
     to_date = (today + datetime.timedelta(days=max_dte)

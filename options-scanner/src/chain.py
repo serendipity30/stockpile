@@ -6,7 +6,7 @@ from datetime import date, datetime
 
 import pandas as pd
 
-from stocks_shared.yahoo import fetch_live_price
+from stocks_shared.yahoo import fetch_live_price, normalize_ticker
 
 log = logging.getLogger(__name__)
 
@@ -55,10 +55,11 @@ def _bs_gamma(S: float, K: float, T: float, r: float, sigma: float) -> float:
 
 
 def _fetch_chain_yahoo(ticker: str, opt_type: str = "both",
-                       min_dte: int = 365,
-                       max_dte: int | None = None) -> pd.DataFrame:
+                       min_dte: int = 30,
+                       max_dte: int | None = 90) -> pd.DataFrame:
     import yfinance as yf
 
+    ticker = normalize_ticker(ticker)
     spot = fetch_live_price(ticker)
     if not spot:
         raise ValueError(f"Could not fetch live price for {ticker}")
@@ -144,7 +145,7 @@ def _fetch_chain_yahoo(ticker: str, opt_type: str = "both",
 
 
 def fetch_chain(ticker: str, opt_type: str = "both",
-                min_dte: int = 365, max_dte: int | None = None,
+                min_dte: int = 30, max_dte: int | None = 90,
                 provider: str = "yahoo",
                 schwab_config: dict | None = None) -> pd.DataFrame:
     """Return enriched DataFrame of options with min_dte <= DTE <= max_dte.

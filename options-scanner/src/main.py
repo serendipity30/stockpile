@@ -61,15 +61,15 @@ def main() -> None:
     parser.add_argument(
         "--min-dte",
         type=int,
-        default=365,
-        help="Minimum days to expiration (default: 365)",
+        default=30,
+        help="Minimum days to expiration (default: 30)",
     )
     parser.add_argument(
         "--max-dte",
         type=int,
-        default=None,
+        default=90,
         metavar="N",
-        help="Maximum days to expiration (default: no limit)",
+        help="Maximum days to expiration (default: 90)",
     )
     parser.add_argument(
         "--min-oi",

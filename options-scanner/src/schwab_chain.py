@@ -30,7 +30,7 @@ def _safe_int(val, default: int = 0) -> int:
 
 
 def fetch_chain_schwab(ticker: str, opt_type: str = "both",
-                       min_dte: int = 365, max_dte: int | None = None,
+                       min_dte: int = 30, max_dte: int | None = 90,
                        schwab_config: dict | None = None) -> pd.DataFrame:
     """Fetch Schwab option chain and return normalized DataFrame."""
     from stocks_shared.schwab_live import (

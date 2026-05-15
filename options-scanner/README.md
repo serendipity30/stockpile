@@ -124,6 +124,39 @@ uv run options-scanner/run_scanner.py AMD --roll \
     --type call --strike 600 --expiration 2026-01-16
 ```
 
+### Index tickers
+
+Each data source uses a different prefix for cash-settled index
+options. The scanner normalizes automatically so you can always type
+the bare name:
+
+| Index | Yahoo Finance | Schwab |
+|-------|--------------|--------|
+| S&P 500 | `^SPX` / `^SPXW` | `$SPX` / `$SPXW` |
+| Nasdaq 100 | `^NDX` / `^NDXP` | `$NDX` / `$NDXP` |
+| Russell 2000 | `^RUT` | `$RUT` |
+| VIX | `^VIX` | `$VIX` |
+| Dow Jones | `^DJI` / `^INDU` | `$DJI` / `$INDU` |
+| S&P 100 | `^OEX` / `^XEO` | `$OEX` / `$XEO` |
+| Volatility (Nasdaq/Russell) | `^VXN` / `^RVX` | `$VXN` / `$RVX` |
+| Treasury rates | `^TNX` / `^TYX` | `$TNX` / `$TYX` |
+
+All of these forms resolve to the same result:
+
+```
+SPX        bare name — works on both Yahoo and Schwab
+^SPX       Yahoo Finance native form — also works on Schwab
+$SPX       Schwab native form — also works on Yahoo Finance
+```
+
+**Escaping:** If a ticker symbol conflicts with a known index name
+(e.g. `SPX` is also NYSE-listed SPX Corp), append `!` to bypass
+normalization and query the underlying stock directly:
+
+```
+SPX!       use exactly "SPX" — fetches the stock, not the index
+```
+
 ### All options
 
 | Flag | Default | Meaning |
@@ -414,6 +447,10 @@ data.
 ## Roadmap
 
 Planned improvements, roughly in priority order:
+
+- **Index ticker normalization** — implemented. Yahoo Finance uses
+  `^SPX`, `^NDX`, etc.; Schwab uses `$SPX`, `$NDX`, etc. Typing the
+  bare name (`SPX`, `NDX`, …) works with both data sources.
 
 - **GEX (Gamma Exposure)** — implemented in the web UI single-ticker
   tab. See the [Gamma Exposure section](#gamma-exposure-gex) above

@@ -803,10 +803,10 @@ def _tab_single() -> None:
     with st.container(border=True):
         n1, n2, n3, n4 = st.columns([1, 1, 1, 3], vertical_alignment="bottom")
         with n1:
-            min_dte = st.number_input("Min DTE", value=365, min_value=1,
+            min_dte = st.number_input("Min DTE", value=30, min_value=1,
                                       key="s_min_dte")
         with n2:
-            max_dte_inp = st.number_input("Max DTE", value=0, min_value=0,
+            max_dte_inp = st.number_input("Max DTE", value=90, min_value=0,
                                           help="0 = no limit", key="s_max_dte")
         with n3:
             min_oi = st.number_input("Min OI", value=25, min_value=0,

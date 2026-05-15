@@ -171,7 +171,7 @@ def main() -> None:
                         choices=["schwab", "robinhood", "fidelity", "merrill"])
     parser.add_argument("--tickers", nargs="*", metavar="TICKER",
                         help="Only scan these tickers (default: all)")
-    parser.add_argument("--min-dte", type=int, default=365)
+    parser.add_argument("--min-dte", type=int, default=30)
     parser.add_argument("--min-oi",  type=int, default=25)
     parser.add_argument("--max-delta", type=float, default=0.70)
     parser.add_argument("--top",     type=int, default=5,

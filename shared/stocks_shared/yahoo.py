@@ -6,9 +6,35 @@ from math import erfc, exp, isfinite, log, sqrt
 _price_cache: dict[str, float | None] = {}
 _chain_cache: dict[tuple[str, str], object] = {}
 
+# Index tickers Yahoo Finance lists under ^NAME rather than bare NAME.
+_INDEX_TICKERS = frozenset({
+    "SPX", "SPXW", "GSPC",   # S&P 500
+    "NDX", "NDXP", "IXIC",   # Nasdaq
+    "RUT",                    # Russell 2000
+    "DJI", "INDU",            # Dow Jones
+    "VIX", "VXN", "RVX",     # Volatility
+    "OEX", "XEO",             # S&P 100
+    "TNX", "TYX",             # Rates
+})
+
+
+def normalize_ticker(ticker: str) -> str:
+    """Prepend ^ for index tickers that Yahoo Finance lists under ^NAME.
+
+    Trailing ! disables normalization — the bare symbol is used as-is.
+    """
+    t = ticker.strip().upper()
+    if t.endswith("!"):
+        return t[:-1]
+    t = t.lstrip("^$")
+    if t in _INDEX_TICKERS:
+        return f"^{t}"
+    return t
+
 
 def fetch_live_price(ticker: str) -> float | None:
     """Return the last trade or regular market price for ticker."""
+    ticker = normalize_ticker(ticker)
     if ticker in _price_cache:
         return _price_cache[ticker]
     try:
@@ -23,6 +49,7 @@ def fetch_live_price(ticker: str) -> float | None:
 
 def fetch_option_chain(ticker: str, exp_yf: str):
     """Return the option chain for ticker at expiration exp_yf (YYYY-MM-DD), cached."""
+    ticker = normalize_ticker(ticker)
     key = (ticker, exp_yf)
     if key in _chain_cache:
         return _chain_cache[key]
@@ -131,6 +158,7 @@ def fetch_history(ticker: str, start: str | None = None, end: str | None = None)
     import pandas as pd
     import yfinance as yf
 
+    ticker = normalize_ticker(ticker)
     df = yf.Ticker(ticker).history(start=start, end=end, auto_adjust=True)
     if df.empty:
         return pd.DataFrame(columns=["Close"])

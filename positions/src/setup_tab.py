@@ -630,6 +630,12 @@ def main():
         _log("Connecting to Google Sheets...")
         service = sheets.get_service()
 
+        if args.csv_override:
+            csv_abs = str(Path(args.csv_override).resolve())
+            matched = [a for a in accounts if a.csv and Path(a.csv).resolve() == Path(csv_abs).resolve()]
+            if matched:
+                accounts = matched
+
         for acct in accounts:
             csv_path = args.csv_override or acct.csv
             if not csv_path:

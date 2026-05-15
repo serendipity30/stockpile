@@ -5,6 +5,8 @@ from datetime import date
 
 import pandas as pd
 
+from stocks_shared.yahoo import normalize_ticker
+
 log = logging.getLogger(__name__)
 
 
@@ -12,6 +14,7 @@ def fetch_earnings_dates(ticker: str) -> list:
     """Return sorted list of upcoming earnings dates (up to 8 quarters)."""
     try:
         import yfinance as yf
+        ticker = normalize_ticker(ticker)
         t = yf.Ticker(ticker)
         today = date.today()
 
