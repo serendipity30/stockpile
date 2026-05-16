@@ -1407,8 +1407,14 @@ def _show_payoff_chart(row: pd.Series, spot: float) -> None:
         chart = chart + r
     chart = chart.properties(
         height=300,
-        title=alt.TitleParams(text=title, fontSize=14, fontWeight="bold",
-                               anchor="start", color="#0f172a"),
+        title=alt.TitleParams(
+            text=title,
+            subtitle=_scan_stamp_text() or None,
+            subtitleColor=_scan_stamp_color(),
+            subtitleFontSize=11,
+            fontSize=14, fontWeight="bold",
+            anchor="start", color="#0f172a",
+        ),
     )
     st.altair_chart(chart, use_container_width=True)
     be_note = []
@@ -1538,6 +1544,7 @@ def _show_spreads_table(sub: pd.DataFrame, strategy_name: str,
         selection_mode="single-row",
         key=f"sp_tbl_{strategy_name.replace(' ', '_').replace('/', '_').replace('×', 'x')}",
     )
+    _stamp_caption()
     selected_rows = event.selection.rows if hasattr(event, "selection") else []
     return selected_rows[0] if selected_rows else None
 
@@ -1688,6 +1695,10 @@ def _render_spreads_view(
                 width_mode=width_mode,
             )
 
+        st.session_state["scan_ts"] = datetime.now().astimezone()
+        st.session_state["scan_provider"] = st.session_state.get(
+            "data_source", "yahoo"
+        )
         st.session_state[session_key] = {
             "ticker": ticker_clean,
             "spot": float(df["spot"].iloc[0]),
