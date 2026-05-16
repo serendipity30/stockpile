@@ -311,8 +311,8 @@ Three summary metrics appear above the chart:
 
 A large **green wall above your strike** means dealers are long gamma
 there — their hedging activity tends to cap the stock near that
-level. That is tailwind for a covered call: the stock is less likely
-to blow through your strike.
+level, acting like a ceiling. The stock has trouble breaking
+through, which is what a covered call seller wants.
 
 A **red zone above your strike** means the opposite — if the stock
 enters that range, dealer hedging amplifies the move and your call

@@ -260,6 +260,63 @@ _IVPP_HELP = ("Percentage points the option's IV sits above the fitted"
 _VOL_HELP  = "Yellow: fewer than 4 contracts traded today — very thin activity."
 
 
+# ── Scan provenance stamp ────────────────────────────────────────────────────
+# Data source + scan timestamp shown on every chart and below every table so
+# the context survives screenshots, HTML exports, and Reddit reposts.
+
+_PROVIDER_LABELS = {"yahoo": "Yahoo Finance", "schwab": "Schwab"}
+_PROVIDER_COLORS = {"yahoo": "#16a34a", "schwab": "#2563eb"}  # green / blue
+
+
+def _tz_abbr(ts) -> str:
+    """3–4 char timezone abbreviation that works across platforms.
+
+    Python's strftime('%Z') gives the full name on Windows ('Eastern
+    Daylight Time') but the short form on POSIX ('EDT'). Normalize by
+    taking the uppercase initials when the name is long.
+    """
+    name = ts.tzname() or ""
+    if not name:
+        return ""
+    if len(name) <= 4:
+        return name
+    return "".join(w[0] for w in name.split() if w[:1].isupper())[:4]
+
+
+def _scan_stamp_text() -> str:
+    """Format like 'Schwab · 2026-05-16 14:32 EDT'. Empty if no scan yet.
+
+    Reads `scan_provider` (snapshotted at scan time) — NOT the live data
+    source dropdown — so the stamp reflects what was actually used to
+    fetch the displayed data, even after the user changes the dropdown.
+    """
+    ts = st.session_state.get("scan_ts")
+    if not ts:
+        return ""
+    provider = st.session_state.get("scan_provider", "yahoo")
+    label = _PROVIDER_LABELS.get(provider, provider)
+    return f"{label} · {ts.strftime('%Y-%m-%d %H:%M')} {_tz_abbr(ts)}".rstrip()
+
+
+def _scan_stamp_color() -> str:
+    """Hex color for the stamp text, based on the provider at scan time."""
+    provider = st.session_state.get("scan_provider", "yahoo")
+    return _PROVIDER_COLORS.get(provider, "#94a3b8")
+
+
+def _stamp_caption() -> None:
+    """Render the scan stamp as a colored caption below a table."""
+    text = _scan_stamp_text()
+    if not text:
+        return
+    color = _scan_stamp_color()
+    st.markdown(
+        f'<div style="color:{color}; font-size:0.85rem; '
+        f'margin-top:-4px;">{text}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def _show_df(sub: pd.DataFrame, roll_close_cost: float | None = None,
              min_oi: int = 0) -> None:
     if sub.empty:
@@ -327,6 +384,7 @@ def _show_df(sub: pd.DataFrame, roll_close_cost: float | None = None,
 
     st.dataframe(styled, column_config=col_cfg, hide_index=True,
                  width="stretch")
+    _stamp_caption()
 
 
 def _show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
@@ -517,6 +575,9 @@ def _show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
         height=380,
         title=alt.TitleParams(
             text=title_text,
+            subtitle=_scan_stamp_text() or None,
+            subtitleColor=_scan_stamp_color(),
+            subtitleFontSize=11,
             fontSize=16, fontWeight="bold", anchor="start",
             color="#0f172a",
         ),
@@ -636,6 +697,7 @@ def _show_chain_table(df_exp: pd.DataFrame, buy: bool, mode: str,
                                                          width="small")
     st.dataframe(styled, column_config=col_cfg, hide_index=True,
                  width="stretch")
+    _stamp_caption()
 
 
 def _show_gex_chart(df: pd.DataFrame, spot: float,
@@ -671,11 +733,6 @@ def _show_gex_chart(df: pd.DataFrame, spot: float,
     gex_sorted   = gex.sort_values("strike")
     cumulative   = gex_sorted["gex"].cumsum()
     zero_cross   = gex_sorted["strike"][cumulative >= 0].min()
-
-    st.markdown(
-        "<h5 style='margin:0 0 5px 0'>Gamma Exposure (GEX) by strike</h5>",
-        unsafe_allow_html=True,
-    )
 
     g1, g2, g3 = st.columns(3)
     regime = "Pinning (mean-reverting)" if total_gex >= 0 else "Amplifying (trending)"
@@ -717,7 +774,17 @@ def _show_gex_chart(df: pd.DataFrame, spot: float,
     ).encode(x="spot:Q")
 
     st.altair_chart(
-        (bars + spot_rule).properties(height=240).configure_view(strokeWidth=0),
+        (bars + spot_rule).properties(
+            height=240,
+            title=alt.TitleParams(
+                text="Gamma Exposure (GEX) by strike",
+                subtitle=_scan_stamp_text() or None,
+                subtitleColor=_scan_stamp_color(),
+                subtitleFontSize=11,
+                fontSize=14, fontWeight="bold", anchor="start",
+                color="#0f172a",
+            ),
+        ).configure_view(strokeWidth=0),
         use_container_width=True,
     )
 
@@ -906,6 +973,10 @@ def _tab_single() -> None:
             else:
                 st.warning(f"Could not fetch chain for {exp_yf} — NetCr column omitted.")
 
+        st.session_state["scan_ts"] = datetime.now().astimezone()
+        st.session_state["scan_provider"] = st.session_state.get(
+            "data_source", "yahoo"
+        )
         st.session_state["single_results"] = {
             "ticker": ticker_clean,
             "df": df,
@@ -957,7 +1028,7 @@ def _tab_single() -> None:
                    buy_r, ticker=ticker_r, key_prefix="s")
 
     _show_gex_chart(df_r, spot,
-                    provider=st.session_state.get("data_source", "yahoo"))
+                    provider=st.session_state.get("scan_provider", "yahoo"))
 
     chosen_exp = st.session_state.get("s_chart_exp")
     if chosen_exp:
@@ -1173,6 +1244,10 @@ def _tab_portfolio() -> None:
             })
 
         progress.empty()
+        st.session_state["scan_ts"] = datetime.now().astimezone()
+        st.session_state["scan_provider"] = st.session_state.get(
+            "data_source", "yahoo"
+        )
         st.session_state["portfolio_results"] = {
             "results": results,
             "uploaded_name": uploaded.name,
@@ -1325,6 +1400,39 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Primary (Scan) button color tracks the data-source dropdown live: green
+# for Yahoo Finance, blue for Schwab. Reads the selectbox widget key
+# (`data_source_choice`) — NOT the effective `data_source` — for two
+# reasons: (1) Streamlit populates widget-key session state BEFORE the
+# rerun begins, so the CSS at script-top sees the new value on the same
+# rerun the user changed the dropdown; (2) clicking the Scan button doesn't
+# change the dropdown, so the button color stays put across scans.
+_BTN_COLORS = {
+    "yahoo":  ("#16a34a", "#15803d"),   # normal, hover
+    "schwab": ("#2563eb", "#1d4ed8"),
+}
+_btn_bg, _btn_hover = _BTN_COLORS.get(
+    st.session_state.get("data_source_choice", "yahoo"),
+    _BTN_COLORS["yahoo"],
+)
+st.markdown(
+    f"""
+    <style>
+    .stButton > button[kind="primary"],
+    button[data-testid="stBaseButton-primary"] {{
+        background-color: {_btn_bg} !important;
+        border-color: {_btn_bg} !important;
+    }}
+    .stButton > button[kind="primary"]:hover,
+    button[data-testid="stBaseButton-primary"]:hover {{
+        background-color: {_btn_hover} !important;
+        border-color: {_btn_hover} !important;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # App title overlaid on Streamlit's top header bar. Title sits to the
 # right of the sidebar toggle, aligned with the left edge of the form
 # content (matches .block-container's left padding in `layout=wide`).
@@ -1372,6 +1480,7 @@ with st.sidebar:
         index=_source_idx,
         label_visibility="collapsed",
         format_func=_source_label,
+        key="data_source_choice",
     )
 
     # Effective provider — fall back to yahoo if schwab isn't ready
