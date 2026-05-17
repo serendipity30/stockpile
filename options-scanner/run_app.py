@@ -876,7 +876,7 @@ def _tab_single() -> None:
 
     # ── Group 3: Filters ──────────────────────────────────────────────────────
     with st.container(border=True):
-        n1, n2, n3, n4 = st.columns([1, 1, 1, 3], vertical_alignment="bottom")
+        n1, n2, n3, n4 = st.columns([1, 1, 1, 6], vertical_alignment="bottom")
         with n1:
             min_dte = st.number_input("Min DTE", value=30, min_value=1,
                                       key="s_min_dte")
@@ -888,24 +888,38 @@ def _tab_single() -> None:
                                      key="s_min_oi")
         with n4:
             st.markdown(
-                "<p style='text-align:right; color:#f97316; font-size:1.1rem;"
-                " font-weight:600; margin:0; padding-bottom:1rem;'>"
+                "<p style='text-align:left; color:#f97316; font-size:1.1rem;"
+                " font-weight:600; margin:0; padding:0 0 1rem 20px;'>"
                 "⚠ Best used during market hours —<br>"
                 "pre/post-market data may be stale or missing.</p>",
                 unsafe_allow_html=True,
             )
 
-    # ── Scan row: delta, top n, scan button ───────────────────────────────────
-    s1, s2, _, s3 = st.columns([2, 0.8, 1, 1.2], vertical_alignment="bottom")
+    # ── Slider + Top N + Scan row ─────────────────────────────────────────────
+    # All three controls sit on one row. Layout (T=9):
+    #   Delta=2   → covers Min DTE + Max DTE width above
+    #   Top N=1   → aligns with Min OI (with CSS padding-left tweak)
+    #   spacer=0.15
+    #   Scan=1    → ~11% wide, left-aligned with Option Type radio
+    #               column above (Option Type starts at ~36.7% of row)
+    #   spacer=4.85
+    s1, s2, _, s3, _ = st.columns(
+        [2, 1, 0.15, 1, 4.85], vertical_alignment="bottom",
+    )
     with s1:
         delta_range = st.slider("Delta Range (abs value)", 0.0, 1.0,
                                 (0.10, 0.75), step=0.05, key="s_delta")
     with s2:
-        top_n = st.number_input("Top N", value=10, min_value=1,
-                                max_value=50, key="s_top")
+        with st.container(key="top_n_align"):
+            top_n = st.number_input("Top N", value=10, min_value=1,
+                                    max_value=50, key="s_top")
     with s3:
-        scanned = st.button("Scan", type="primary",
-                            use_container_width=True, key="s_scan_btn")
+        # Wrapped so CSS can lift the button a few pixels above the row's
+        # bottom baseline (it otherwise sits flush with the bottom of the
+        # Top N input, which reads as too low against the input's label).
+        with st.container(key="scan_btn_lift"):
+            scanned = st.button("Scan", type="primary",
+                                use_container_width=True, key="s_scan_btn")
 
     # ── Run scan on button click, store in session state ──────────────────────
     # Also triggers when the sticky "Rescan" pill below the results was
@@ -1887,7 +1901,11 @@ def _tab_neutral() -> None:
 st.markdown(
     """
     <style>
-    .block-container { padding-top: 1rem !important; }
+    .block-container {
+        padding-top: 1rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
 
     [data-testid="stDivider"] {
         margin-top: 0 !important;
@@ -1909,8 +1927,34 @@ st.markdown(
         font-size: 0.85rem !important;
     }
 
-    /* Primary (Scan) button — always orange so it stands out on every
-       theme, not just on hover. */
+    /* Cap number-input widths so the form doesn't look like an enterprise
+       intake form. The number itself rarely needs more than 7rem; the
+       column still controls horizontal position, the input just doesn't
+       fill it. */
+    [data-testid="stNumberInput"] {
+        max-width: 7rem;
+    }
+
+    /* Nudge the Top N input right so it lines up vertically with Min OI
+       in the row above. The combined slider/Top N/Scan row has 5
+       columns (4 gaps) vs. the filter row's 4 columns (3 gaps), so the
+       natural offset is roughly 1 column-gap. Tuned to ~1.15rem; bump
+       up if Top N drifts left of Min OI, bump down if it overshoots. */
+    [class*="st-key-top_n_align"] {
+        padding-left: 1.15rem;
+    }
+
+    /* Lift the Scan button a few pixels above the row's bottom baseline
+       so it sits even with the visual middle of the Top N input rather
+       than flush with the input's bottom edge. */
+    [class*="st-key-scan_btn_lift"] {
+        margin-bottom: 4px;
+    }
+
+    /* Primary (Scan) button — orange fallback so it stands out on every
+       theme even before the data-source-aware override (green = Yahoo,
+       blue = Schwab) is injected below. White text always, since the
+       overriding background color is dark on every variant. */
     .stButton > button[kind="primary"],
     button[data-testid="stBaseButton-primary"] {
         background-color: #f97316 !important;
@@ -1948,8 +1992,10 @@ st.markdown(
         color: #1e293b !important;
     }
 
-    /* Floating rescan button — pinned to the top header bar (centered
-       horizontally) so it stays visible at every scroll position.
+    /* Floating rescan button — pinned to the top header bar just right
+       of the logo (logo is ~12rem wide starting at 5rem, so it spans
+       5rem–17rem when the sidebar is collapsed). Tracks the favicon's
+       sidebar-shift via the same data-sidebar-open observer.
        Streamlit 1.57 adds `st-key-<key>` to a container's wrapping div;
        we use a substring match so the same rule covers every tab's pill
        (rescan_pill_single, rescan_pill_sp, rescan_pill_dir,
@@ -1957,11 +2003,14 @@ st.markdown(
        hides inactive tab panels via display:none. */
     [class*="st-key-rescan_pill"] {
         position: fixed;
-        top: 9px;
-        left: 50%;
-        transform: translateX(-50%);
+        top: 13px;
+        left: 18rem;
+        transform: none;
         z-index: 999990;
         width: auto !important;
+    }
+    body[data-sidebar-open="true"] [class*="st-key-rescan_pill"] {
+        left: 33rem;
     }
     [class*="st-key-rescan_pill"] .stButton > button {
         padding: 0.3rem 0.85rem !important;
@@ -1969,6 +2018,32 @@ st.markdown(
         border-radius: 0.5rem !important;
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
         font-weight: 600;
+    }
+
+    /* Data source segmented control — pinned just right of the rescan
+       pill, with the rescan slot reserved (~12rem) even when no scan
+       has been run so the toggle doesn't shift around when results
+       appear. Tracks the favicon's sidebar shift via data-sidebar-open. */
+    [class*="st-key-data_source_pill"] {
+        position: fixed;
+        top: 13px;
+        left: 30rem;
+        transform: none;
+        z-index: 999990;
+        width: auto !important;
+    }
+    body[data-sidebar-open="true"] [class*="st-key-data_source_pill"] {
+        left: 45rem;
+    }
+    [class*="st-key-data_source_pill"] [data-testid="stSegmentedControl"] {
+        background: rgba(255, 255, 255, 0.85);
+        border-radius: 0.5rem;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+    }
+    [class*="st-key-data_source_pill"] button {
+        padding: 0.25rem 0.75rem !important;
+        min-height: 2.5rem;
+        font-weight: 500;
     }
     </style>
     """,
@@ -2002,6 +2077,23 @@ st.markdown(
     button[data-testid="stBaseButton-primary"]:hover {{
         background-color: {_btn_hover} !important;
         border-color: {_btn_hover} !important;
+    }}
+    /* Active button in the data-source pill picks up the same green
+       (yahoo) / blue (schwab) accent — outline + text, neutral
+       background. Streamlit marks the active button differently
+       across versions; selectors cover aria-pressed, aria-selected,
+       and any data-testid suffix containing "Active". */
+    [class*="st-key-data_source_pill"] button[aria-pressed="true"],
+    [class*="st-key-data_source_pill"] button[aria-selected="true"],
+    [class*="st-key-data_source_pill"] button[data-testid*="Active"] {{
+        color: {_btn_bg} !important;
+        border-color: {_btn_bg} !important;
+        box-shadow: inset 0 0 0 1px {_btn_bg} !important;
+    }}
+    [class*="st-key-data_source_pill"] button[aria-pressed="true"] p,
+    [class*="st-key-data_source_pill"] button[aria-selected="true"] p,
+    [class*="st-key-data_source_pill"] button[data-testid*="Active"] p {{
+        color: {_btn_bg} !important;
     }}
     </style>
     """,
@@ -2103,45 +2195,36 @@ _schwab_configured = (
     and not _cfg_schwab["app_secret"].startswith("your-")
 )
 
-# Hidden-by-default sidebar: data source + theme
-with st.sidebar:
-    st.markdown("**Data source**")
+# Title-bar data source switch — pinned via CSS to the right of the
+# rescan pill so it's always visible without opening the sidebar.
+def _source_label(s: str) -> str:
+    if s == "yahoo":
+        return "Yahoo Finance"
+    return "Schwab (live)" if _schwab_configured else "Schwab (unconfigured)"
 
-    def _source_label(s: str) -> str:
-        if s == "yahoo":
-            return "Yahoo Finance"
-        return "Schwab (live)" if _schwab_configured else "Schwab (unconfigured)"
-
-    # Only pre-select Schwab if it's actually configured
-    _source_idx = 1 if (_cfg_provider == "schwab" and _schwab_configured) else 0
-    _source_raw = st.selectbox(
+_source_default = "schwab" if (_cfg_provider == "schwab" and _schwab_configured) else "yahoo"
+with st.container(key="data_source_pill"):
+    _source_raw = st.segmented_control(
         "Data source",
         ["yahoo", "schwab"],
-        index=_source_idx,
-        label_visibility="collapsed",
+        default=_source_default,
         format_func=_source_label,
+        label_visibility="collapsed",
         key="data_source_choice",
     )
+if _source_raw is None:
+    _source_raw = "yahoo"
 
-    # Effective provider — fall back to yahoo if schwab isn't ready
-    if _source_raw == "schwab" and not _schwab_configured:
-        data_source = "yahoo"
-        st.warning(
-            "Schwab credentials not configured. "
-            "See `SCHWAB_DATA_SOURCE.md` to set up API access.",
-        )
-    elif _source_raw == "schwab":
-        data_source = "schwab"
-        st.caption("Real-time quotes and Greeks via the Schwab developer API.")
-    else:
-        data_source = "yahoo"
-        st.caption("Delayed quotes via Yahoo Finance (no setup required).")
+# Effective provider — fall back to yahoo if schwab isn't ready
+if _source_raw == "schwab" and _schwab_configured:
+    data_source = "schwab"
+else:
+    data_source = "yahoo"
+st.session_state["data_source"] = data_source
+st.session_state["schwab_config"] = _cfg_schwab if data_source == "schwab" else None
 
-    # Publish effective provider + config for fetch functions
-    st.session_state["data_source"] = data_source
-    st.session_state["schwab_config"] = _cfg_schwab if data_source == "schwab" else None
-
-    st.divider()
+# Sidebar: theme only for now. Reserved for future settings.
+with st.sidebar:
     st.markdown("**Theme**")
     theme_choice = st.radio(
         "Theme",
