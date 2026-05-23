@@ -501,7 +501,10 @@ def _render_view(
                             for lg in raw_legs
                         ]
                         spread_position = position_from_legs(
-                            underlying=ticker,
+                            # ticker_r is the .strip().upper() snapshot from
+                            # scan time; `ticker` is the live widget value
+                            # that drifts if the user edits the input box.
+                            underlying=ticker_r,
                             spot=spot,
                             legs_spec=legs_spec,
                             earnings_dates=(),

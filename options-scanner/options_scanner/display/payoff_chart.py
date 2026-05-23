@@ -28,6 +28,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from options_scanner.display.scan_stamp import scan_stamp_color, scan_stamp_text
+
 # ── Public helpers ───────────────────────────────────────────────────────────
 
 
@@ -52,6 +54,16 @@ _GREEK_HELP = {
     "θ": "Net daily theta — premium earned (positive) or paid (negative) per day.",
     "ν": "Net vega — P&L per 1-point rise in IV. Positive = benefits from IV expansion.",
 }
+
+
+def _max_days_forward(dte: int) -> int:
+    """Max value for the Days-forward slider.
+
+    Returns 0 when the slider should be hidden (DTE ≤ 1) — Streamlit's
+    ``st.slider`` raises if ``min_value == max_value``, so the caller
+    must branch on this.
+    """
+    return max(int(dte) - 1, 0)
 
 
 # ── Plotly figure builder ────────────────────────────────────────────────────
@@ -177,9 +189,23 @@ def _build_payoff_figure(
     strategy = row.get("strategy", "Spread")
     exp = row.get("expiration", "")
     title_text = f"<b>{strategy}</b> — {exp} — POP {float(row.get('pop', 0)):.0%}"
+    # Embed the scan-provenance stamp (data source · timestamp) as a
+    # subtitle so screenshots / exports of the chart carry that context.
+    # Requires Plotly ≥ 5.20 for title.subtitle support — this project
+    # ships 6.7.0 per uv.lock.
+    stamp = scan_stamp_text() or ""
+    title_dict = dict(
+        text=title_text,
+        font=dict(size=14, color="#0f172a"),
+        x=0, xanchor="left",
+    )
+    if stamp:
+        title_dict["subtitle"] = dict(
+            text=stamp,
+            font=dict(size=11, color=scan_stamp_color()),
+        )
     fig.update_layout(
-        title=dict(text=title_text, font=dict(size=14, color="#0f172a"),
-                   x=0, xanchor="left"),
+        title=title_dict,
         height=440,
         hovermode="x unified",
         xaxis=dict(
@@ -268,12 +294,20 @@ def show_payoff_chart(
                  "1.00 = current IV; >1 simulates an IV expansion; <1 a crush.",
         )
     with c2:
-        days_fwd = st.slider(
-            "Days forward (time decay)", 0, max(dte - 1, 0), 0, 1,
-            key=f"{key_prefix}_days_fwd",
-            help="Move the valuation date forward. As days pass the Current "
-                 "P/L curve collapses toward the At Expiration curve.",
-        )
+        max_days = _max_days_forward(dte)
+        if max_days == 0:
+            # st.slider(min=0, max=0) raises StreamlitAPIException. Skip
+            # the widget entirely on ≤1-DTE spreads; the current curve
+            # already equals the expiry curve at this point.
+            days_fwd = 0
+            st.caption("Time decay slider unavailable for 1-DTE spreads.")
+        else:
+            days_fwd = st.slider(
+                "Days forward (time decay)", 0, max_days, 0, 1,
+                key=f"{key_prefix}_days_fwd",
+                help="Move the valuation date forward. As days pass the Current "
+                     "P/L curve collapses toward the At Expiration curve.",
+            )
     with c3:
         st.write("")  # vertical spacer to align the button
         if st.button("Reset", key=f"{key_prefix}_reset",

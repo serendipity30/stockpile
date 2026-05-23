@@ -492,3 +492,19 @@ def test_scan_spreads_large_result_set_returns_tuple(synthetic_chain):
     # Confirm we got more than zero matches with a wide net — exercises the
     # styling/render path that previously crashed on big result sets.
     assert len(df) > 0
+
+
+# ── Payoff chart helpers ────────────────────────────────────────────────────
+
+def test_max_days_forward_dte_one_returns_zero():
+    """Regression: DTE=1 used to crash the days-forward slider in the
+    payoff chart with StreamlitAPIException because
+    st.slider(min=0, max=0, ...) is invalid. The helper now returns 0
+    so the caller can branch and skip the slider entirely.
+    """
+    from options_scanner.display.payoff_chart import _max_days_forward
+    assert _max_days_forward(1) == 0
+    assert _max_days_forward(0) == 0   # already clamped upstream too
+    assert _max_days_forward(2) == 1
+    assert _max_days_forward(30) == 29
+    assert _max_days_forward(90) == 89
