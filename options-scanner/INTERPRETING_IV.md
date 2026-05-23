@@ -93,13 +93,30 @@ earnings is information you already had.
 
 The surface is a 2-D fit: IV ≈ f(log-moneyness, √T). It assumes IV
 varies smoothly across strikes (the smile) and across time (term
-structure). It does not model:
+structure).
+
+Before fitting, the scanner applies a configurable data-cleaning
+pipeline to remove quotes that would distort the surface:
+
+- **OTM only** — deep-ITM options inherit inflated IV from their
+  put-call-parity counterparts; excluding them keeps the fit in
+  the tradeable range
+- **Spread filter** — wide bid-ask spreads signal illiquid or
+  stale quotes; those options are dropped from the regression
+- **Delta range** — options with |Δ| outside 0.05–0.95 are
+  excluded by default
+
+These defaults are configurable under the **Surface fit filters**
+expander in the Single Ticker tab. All options still appear in
+the chart and table — only the regression itself is filtered.
+
+The surface does not model:
 
 - Asymmetric skew beyond what the polynomial captures
 - Strike-specific events (e.g. a special dividend ex-date inside
   one expiration)
 - Dealer positioning concentrating at specific strikes
-- Quote staleness on illiquid strikes
+- Stale quotes outside market hours (especially on Schwab)
 
 When you see an outlier, asking "could any of the above explain
 it?" is usually a faster gut check than placing a trade.

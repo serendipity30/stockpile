@@ -42,16 +42,20 @@ A browser tab opens at `http://localhost:8501` with five tabs:
 
 - **Single Ticker** — type a symbol, pick Calls/Puts/Both and Sell/Buy,
   hit Scan. Filter inputs: Min DTE / Max DTE, Min OI, Min Vol (today's
-  trading volume), delta range, Top N. You get a volatility-surface
-  chart (top picks labeled with their rank — `1` is the strongest
-  signal per type), a per-expiration chain view sorted by strike with
-  IV+pp row shading and a "Top" column showing the same rank, and a
-  top candidates table ranked across all expirations. A Market View
-  card explains what your Direction × Option Type selection screens
-  for, and selecting any candidate row opens an MC Analyze panel
-  with the per-trade P&L distribution. The data source (Yahoo Finance
-  / Schwab) toggle sits in the title bar so you can flip between
-  sources without opening the sidebar.
+  trading volume), delta range, Top N. A collapsed **Surface fit
+  filters** expander lets you control which options enter the IV surface
+  regression (OTM-only, spread threshold, delta range, min OI for fit)
+  — all options still appear in results, only the fit is affected. You
+  get a volatility-surface chart (green line = fitted surface; top picks
+  labeled with their rank — `1` is the strongest signal per type), a
+  per-expiration chain view sorted by strike with IV+pp row shading and
+  a "Top" column showing the same rank, and a top candidates table
+  ranked across all expirations. A Market View card explains what your
+  Direction × Option Type selection screens for, and selecting any
+  candidate row opens an MC Analyze panel with the per-trade P&L
+  distribution. The data source (Yahoo Finance / Schwab) toggle sits in
+  the title bar so you can flip between sources without opening the
+  sidebar.
 - **Portfolio** — drag in a brokerage CSV (Schwab, Robinhood, Fidelity,
   Merrill, or a hand-written
   [stockpile file](../docs/stockpile-format.md)), pick the format, hit

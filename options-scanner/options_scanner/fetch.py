@@ -25,11 +25,14 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from options_scanner.iv_filters import DEFAULT_CONFIG, SurfaceFilterConfig
+
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_and_enrich(ticker: str, opt_type: str, min_dte: int,
                      max_dte: int | None, provider: str = "yahoo",
-                     schwab_config: dict | None = None):
+                     schwab_config: dict | None = None,
+                     surface_filters: SurfaceFilterConfig = DEFAULT_CONFIG):
     from options_scanner.chain import fetch_chain
     from options_scanner.iv_surface import compute_iv_excess
     from options_scanner.earnings import fetch_earnings_dates, annotate_earnings
@@ -41,7 +44,7 @@ def fetch_and_enrich(ticker: str, opt_type: str, min_dte: int,
         return pd.DataFrame(), [], str(exc)
     if df.empty:
         return df, [], None
-    df = compute_iv_excess(df)
+    df = compute_iv_excess(df, surface_filters=surface_filters)
     earnings = fetch_earnings_dates(ticker)
     df = annotate_earnings(df, earnings)
     return df, earnings, None
@@ -49,7 +52,8 @@ def fetch_and_enrich(ticker: str, opt_type: str, min_dte: int,
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_position(ticker: str, min_dte: int, provider: str = "yahoo",
-                   schwab_config: dict | None = None):
+                   schwab_config: dict | None = None,
+                   surface_filters: SurfaceFilterConfig = DEFAULT_CONFIG):
     """Cached per-ticker chain fetch for portfolio tab."""
     from options_scanner.chain import fetch_chain
     from options_scanner.iv_surface import compute_iv_excess
@@ -61,7 +65,7 @@ def fetch_position(ticker: str, min_dte: int, provider: str = "yahoo",
         return pd.DataFrame(), [], str(exc)
     if df.empty:
         return df, [], None
-    df = compute_iv_excess(df)
+    df = compute_iv_excess(df, surface_filters=surface_filters)
     earnings = fetch_earnings_dates(ticker)
     df = annotate_earnings(df, earnings)
     return df, earnings, None

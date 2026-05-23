@@ -96,33 +96,42 @@ def render_outlook_card(buy: bool, opt_type: str) -> None:
     accent = OUTLOOK_TONE_HEX[cfg["tone"]]
     st.html(
         f"""
+        <style>
+            details > summary {{ list-style: none; }}
+            details > summary::-webkit-details-marker {{ display: none; }}
+        </style>
         <div style="
             border-left: 3px solid {accent};
             background: rgba(255,255,255,0.6);
             border-radius: 6px;
             padding: 0.5rem 0.7rem;
-            font-family: var(--osc-font), -apple-system, sans-serif;
+            font-family: -apple-system, sans-serif;
             line-height: 1.45;
-            color: var(--osc-ink-1);
             height: 100%;
         ">
             <div style="font-size: 0.65rem; font-weight: 700;
                         text-transform: uppercase; letter-spacing: 0.08em;
-                        color: var(--osc-ink-4); margin-bottom: 2px;">
+                        color: #94a3b8; margin-bottom: 2px;">
                 Market view
             </div>
-            <div style="font-size: 0.92rem; font-weight: 600;
-                        color: {accent}; margin-bottom: 4px;">
-                {cfg['stance']}
-            </div>
-            <div style="font-size: 0.78rem; color: var(--osc-ink-2);
-                        margin-bottom: 4px;">
-                {cfg['summary']}
-            </div>
-            <div style="font-size: 0.7rem; font-weight: 500;
-                        color: var(--osc-ink-3); font-style: italic;">
-                e.g. {cfg['examples']}
-            </div>
+            <details>
+                <summary style="
+                    font-size: 0.92rem; font-weight: 600;
+                    color: {accent}; cursor: pointer;
+                    display: flex; align-items: center; gap: 5px;
+                ">
+                    {cfg['stance']}
+                    <span style="font-size: 0.65rem; color: #94a3b8;">▾</span>
+                </summary>
+                <div style="font-size: 0.78rem; color: #475569;
+                            margin-top: 5px; margin-bottom: 4px;">
+                    {cfg['summary']}
+                </div>
+                <div style="font-size: 0.7rem; font-weight: 500;
+                            color: #64748b; font-style: italic;">
+                    e.g. {cfg['examples']}
+                </div>
+            </details>
         </div>
         """
     )

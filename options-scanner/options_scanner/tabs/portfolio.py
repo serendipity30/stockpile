@@ -364,7 +364,8 @@ def tab_portfolio() -> None:
             show_iv_chart(df_filt, spot, "call",
                            int(port_min_oi), int(port_top), False,
                            ticker=ticker, key_prefix=f"p_{ticker}",
-                           min_vol=int(port_min_vol))
+                           min_vol=int(port_min_vol),
+                           provider=st.session_state.get("scan_provider", "yahoo"))
 
             st.markdown("**Top candidates**")
             show_scan_results(df_filt, "call", False, roll_close,

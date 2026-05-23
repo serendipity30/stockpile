@@ -33,6 +33,7 @@ from options_scanner.display.spot_meta import (
     spot_value_html,
 )
 from options_scanner.fetch import fetch_and_enrich
+from options_scanner.iv_filters import SurfaceFilterConfig
 from options_scanner.mc_ui import position_from_chain_row, render_mc_panel
 from options_scanner.recent_scans import build_label, load as load_recent, save as save_recent
 from options_scanner.ui_theme import badge, empty_state, metric_card, section_header
@@ -156,7 +157,7 @@ def tab_single() -> None:
     # ── Group 3: Filters ──────────────────────────────────────────────────────
     with st.container(border=True):
         n1, n2, n3, n4, n5 = st.columns(
-            [1, 1, 1, 1, 5], vertical_alignment="bottom",
+            [1, 1, 1, 1, 5], vertical_alignment="top",
         )
         with n1:
             min_dte = st.number_input("Min DTE", value=30, min_value=1,
@@ -177,12 +178,79 @@ def tab_single() -> None:
             st.markdown(
                 "<div style='padding:0 0 0.4rem 1rem;'>"
                 + badge("MARKET HOURS RECOMMENDED", "warn")
-                + "<p style='color:#475569; font-size:0.78rem; "
+                + "<p style='color:#dc2626; font-weight:700; font-size:0.78rem; "
                 "margin:0.45rem 0 0 0; line-height:1.4;'>"
                 "Pre/post-market quotes may be stale or missing — IV+pp "
                 "rankings depend on fresh data.</p></div>",
                 unsafe_allow_html=True,
             )
+
+    # ── Surface fit filters (advanced, collapsed by default) ─────────────────
+    with st.expander("Surface fit filters", expanded=False):
+        st.caption(
+            "Controls which options are included in the IV surface regression "
+            "that produces IV+pp. Filters apply only to the fit — all options "
+            "still appear in the chart and table."
+        )
+        sf1, sf2 = st.columns([1, 2])
+        with sf1:
+            sf_otm = st.checkbox("OTM only", value=True, key="s_sf_otm",
+                                 help="Calls K > S, puts K < S. Removes deep-ITM "
+                                      "options whose IVs are distorted by "
+                                      "put-call parity and low liquidity.")
+        with sf1:
+            sf_use_spread = st.checkbox("Spread filter", value=True,
+                                        key="s_sf_use_spread",
+                                        help="Remove options with wide bid-ask "
+                                             "spreads relative to mid-price.")
+        with sf2:
+            sf_spread_pct = st.number_input(
+                "Max spread % of mid", value=50, min_value=1, max_value=200,
+                step=5, key="s_sf_spread_pct", disabled=not sf_use_spread,
+                help="Options where (ask−bid)/mid exceeds this are excluded.",
+            )
+        with sf1:
+            sf_use_delta = st.checkbox("Delta range", value=True,
+                                       key="s_sf_use_delta",
+                                       help="Exclude deep-ITM and deep-OTM "
+                                            "options from the surface fit.")
+        with sf2:
+            _dcols = st.columns(2)
+            sf_delta_lo = _dcols[0].number_input(
+                "Min |Δ|", value=0.05, min_value=0.0, max_value=0.49,
+                step=0.01, format="%.2f", key="s_sf_delta_lo",
+                disabled=not sf_use_delta,
+            )
+            sf_delta_hi = _dcols[1].number_input(
+                "Max |Δ|", value=0.95, min_value=0.51, max_value=1.0,
+                step=0.01, format="%.2f", key="s_sf_delta_hi",
+                disabled=not sf_use_delta,
+            )
+        _oi_c1, _oi_c2 = st.columns([1, 2])
+        with _oi_c1:
+            sf_use_min_oi = st.checkbox("Min OI for fit", value=False,
+                                        key="s_sf_use_min_oi",
+                                        help="Require minimum open interest "
+                                             "in the surface fit (separate from "
+                                             "the display Min OI filter above).")
+        with _oi_c2:
+            sf_min_oi_val = st.number_input(
+                "Min OI", value=1, min_value=1, key="s_sf_min_oi_val",
+                disabled=not sf_use_min_oi,
+            )
+
+    # Build hashable filter config from current widget values
+    _sf: list[tuple[str, frozenset]] = []
+    if sf_otm:
+        _sf.append(("otm_only", frozenset()))
+    if sf_use_spread:
+        _sf.append(("spread_pct", frozenset({("max_pct", sf_spread_pct / 100)})))
+    if sf_use_delta:
+        _sf.append(("delta_range", frozenset({("lo", sf_delta_lo),
+                                              ("hi", sf_delta_hi)})))
+    if sf_use_min_oi:
+        _sf.append(("min_oi", frozenset({("min_oi", sf_min_oi_val)})))
+    surface_filter_config: SurfaceFilterConfig = tuple(_sf)
 
     # ── Slider + Top N + Scan row ─────────────────────────────────────────────
     # All three controls sit on one row. Layout (T=9):
@@ -249,6 +317,7 @@ def tab_single() -> None:
                 ticker_clean, eff_opt_fetch, int(min_dte), max_dte_arg,
                 st.session_state.get("data_source", "yahoo"),
                 st.session_state.get("schwab_config"),
+                surface_filter_config,
             )
 
         if err:
@@ -323,6 +392,7 @@ def tab_single() -> None:
             "roll_exp_str": roll_exp.strftime("%Y-%m-%d") if rolling else None,
             "roll_strike": roll_strike if rolling else None,
             "roll_type": roll_type_sel if rolling else None,
+            "surface_filters": surface_filter_config,
         }
 
         # Persist the scan parameters for the Recent Scans dropdown.
@@ -455,7 +525,8 @@ def tab_single() -> None:
 
     show_iv_chart(df_filt, spot, mode_r, res["min_oi"], res["top_n"],
                    buy_r, ticker=ticker_r, key_prefix="s",
-                   min_vol=res.get("min_vol", 0))
+                   min_vol=res.get("min_vol", 0),
+                   provider=st.session_state.get("scan_provider", "yahoo"))
 
     show_gex_chart(df_r, spot,
                     provider=st.session_state.get("scan_provider", "yahoo"),

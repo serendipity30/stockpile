@@ -85,21 +85,18 @@ _btn_bg, _btn_hover = _BTN_COLORS.get(
     _BTN_COLORS["yahoo"],
 )
 
-# Inject the stylesheet and the :root accent variables in a SINGLE
-# st.html() call. Each st.html() renders in its own iframe — if the
-# :root block and the var(--primary) references live in separate iframes
-# the custom property is undefined and the coloring silently disappears.
+# Static layout rules via st.markdown so they land in the main document.
+# st.html() renders in an iframe and cannot affect position:fixed elements
+# in the main page — st.markdown(unsafe_allow_html=True) injects directly.
 _STYLES_CSS = (
     Path(__file__).parent / "options_scanner" / "styles.css"
 ).read_text(encoding="utf-8")
-st.html(f"<style>{_STYLES_CSS}</style>")
+st.markdown(f"<style>{_STYLES_CSS}</style>", unsafe_allow_html=True)
 
-# Dynamic accent rules injected with LITERAL hex values each rerun.
-# CSS custom properties (var()) don't resolve reliably across
-# Streamlit's st.html injection boundary, so the colors must be
-# baked into the rule text. Reads `data_source_choice` (the widget
-# key) — NOT the effective `data_source` — so the color flips on
-# the same rerun the toggle changed.
+# Dynamic accent colors via st.html() — injected fresh each rerun so
+# the button colors flip immediately when the data source toggle changes.
+# Kept separate from the static CSS so each mechanism does what it's
+# good at: st.markdown for layout/positioning, st.html for live updates.
 st.html(f"""<style>
 .stButton > button[kind="primary"],
 button[data-testid="stBaseButton-primary"] {{
@@ -125,16 +122,17 @@ button[data-testid="stBaseButton-primary"]:hover {{
 }}
 </style>""")
 
-# Brand wordmark pinned to the top header bar. The styling lives in
-# styles.css; only the markup is emitted here.
-st.html(
+# Brand wordmark pinned to the top header bar — needs st.markdown so
+# position:fixed in styles.css applies to the main document viewport.
+st.markdown(
     """
     <div class='osc-wordmark-overlay' aria-hidden='true'>
       <span class='osc-wm-dot'></span>
       <span class='osc-wm-brand'>STOCKPILE</span>
       <span class='osc-wm-suffix'>· OPTIONS SCANNER</span>
     </div>
-    """
+    """,
+    unsafe_allow_html=True,
 )
 
 # Sidebar-state observer: watches the actual sidebar element's rendered
@@ -195,28 +193,6 @@ st.session_state["schwab_config"] = _cfg_schwab if data_source == "schwab" else 
 
 
 # ── Page header chips ────────────────────────────────────────────────────
-# The title + subtitle moved to the sidebar "About" panel to reclaim
-# vertical space on the main canvas. Disclaimer + source badge remain
-# inline at the top, right-aligned, since they're small and useful at-a-
-# glance context.
-_src_chip_color = PROVIDER_COLORS.get(data_source, "#94a3b8")
-_src_chip_label = (
-    f"Source: {PROVIDER_LABELS.get(data_source, data_source).upper()}"
-)
-st.markdown(
-    "<div style='display:flex; justify-content:flex-end; "
-    "align-items:center; gap:0.5rem; margin-bottom:0.5rem;'>"
-    + disclaimer_chip("Research tool · Not investment advice")
-    + (
-        f"<span style='display:inline-block; padding:0.2rem 0.65rem; "
-        f"border-radius:6px; font-size:0.78rem; font-weight:500; "
-        f"color:#FFFFFF; background-color:{_src_chip_color};'>"
-        f"{_src_chip_label}</span>"
-    )
-    + "</div>",
-    unsafe_allow_html=True,
-)
-
 # Sidebar: an "About" panel — the legacy theme picker is gone (we now ship
 # one canonical design system). Add helpful links and a status indicator.
 with st.sidebar:
@@ -235,6 +211,10 @@ with st.sidebar:
             "• Defined-risk spreads<br>"
             "• GEX analysis"
         ),
+    )
+    st.markdown(
+        disclaimer_chip("Research tool · Not investment advice"),
+        unsafe_allow_html=True,
     )
     st.markdown("---")
     section_header("Data source", eyebrow="ACTIVE PROVIDER")
