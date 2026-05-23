@@ -127,10 +127,17 @@ def _empty() -> pd.DataFrame:
 
 # ── Payoff diagram ────────────────────────────────────────────────────────────
 
-def spread_payoff_data(legs: list[dict], spot: float, T: float) -> pd.DataFrame:
+def spread_payoff_data(
+    legs: list[dict],
+    spot: float,
+    T: float,
+    iv_multiplier: float = 1.0,
+) -> pd.DataFrame:
     """
     legs: list of {type, strike, qty, entry_mid, iv}
       qty = +1 long, -1 short
+    iv_multiplier scales each leg's IV for the Current P/L curve only —
+      pl_expiry uses intrinsic value at expiration and is IV-independent.
     Returns DataFrame: price, pl_expiry, pl_current (per share)
     """
     prices = np.linspace(spot * 0.78, spot * 1.22, 250)
@@ -139,7 +146,7 @@ def spread_payoff_data(legs: list[dict], spot: float, T: float) -> pd.DataFrame:
     for leg in legs:
         qty = leg["qty"]
         K = leg["strike"]
-        iv = max(leg["iv"], 0.01)
+        iv = max(leg["iv"] * iv_multiplier, 0.01)
         entry = leg["entry_mid"]
         ot = leg["type"]
         for i, p in enumerate(prices):
@@ -1235,6 +1242,7 @@ def scan_spreads(
     hide_earnings: bool = False,
     earnings_dates: list | None = None,
     *,
+    max_pop: float = 1.0,
     max_abs_delta: float = 1.0,
     width_mode: str = "dollar",
 ) -> tuple[pd.DataFrame, list[str]]:
@@ -1278,6 +1286,7 @@ def scan_spreads(
     combined = combined[combined["strategy"].isin(strategies)]
 
     combined = combined[combined["pop"] >= min_pop]
+    combined = combined[combined["pop"] <= max_pop]
     combined = combined[combined["net_delta"].abs() <= max_abs_delta]
 
     if only_positive_theta:

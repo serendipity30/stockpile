@@ -38,13 +38,35 @@ _GREEK_HELP = {
     "ν": "Net vega — profit/loss per 1-point rise in IV. Positive = benefits from IV expansion.",
 }
 
+# Cap displayed rows per strategy so pandas Styler stays under Streamlit's
+# 262_144-cell render limit. Results are pre-sorted by the user's chosen
+# ranking column, so the top N is always the best N.
+_MAX_DISPLAY_ROWS = 100
 
-def _show_spreads_table(sub: pd.DataFrame, strategy_name: str,
-                        spot: float, key_prefix: str = "sp") -> int | None:
-    """Render the ranked spread table. Returns the selected row index or None."""
+
+def _show_spreads_table(
+    sub: pd.DataFrame,
+    strategy_name: str,
+    spot: float,
+    key_prefix: str = "sp",
+) -> tuple[int | None, pd.DataFrame]:
+    """Render the ranked spread table.
+
+    Returns `(selected_row_index, displayed_sub)` — the index is relative to
+    `displayed_sub`, which may be a `head()` of the original `sub` when
+    results exceed `_MAX_DISPLAY_ROWS`. Caller must index back into
+    `displayed_sub`, not the original frame.
+    """
     if sub.empty:
         st.info(f"No {strategy_name} spreads found matching the filters.")
-        return None
+        return None, sub
+
+    # Cap displayed rows — Styler has a per-render cell ceiling, and large
+    # result sets crash the dataframe widget otherwise.
+    total = len(sub)
+    truncated = total > _MAX_DISPLAY_ROWS
+    if truncated:
+        sub = sub.head(_MAX_DISPLAY_ROWS).reset_index(drop=True)
 
     # Disclaimer captions
     if strategy_name == "Calendar / Diagonal":
@@ -89,9 +111,12 @@ def _show_spreads_table(sub: pd.DataFrame, strategy_name: str,
 
     disp = pd.DataFrame(disp_rows)
 
-    # Row styling: θ+ν sweet spot → bold green; green fill; yellow fill
-    def _row_style(row):
-        i = row.name
+    # Row styling: precompute a 2-D style matrix once and apply with
+    # axis=None. Avoids the per-row callback path that pandas uses for
+    # axis=1, which dominates render time on large tables.
+    n_rows = len(sub)
+    row_bgs: list[str] = []
+    for i in range(n_rows):
         orig = sub.iloc[i]
         pt = bool(orig["positive_theta"])
         pv = bool(orig["positive_vega"])
@@ -105,19 +130,23 @@ def _show_spreads_table(sub: pd.DataFrame, strategy_name: str,
             bg = "background-color: rgba(234,179,8,0.22)"
         else:
             bg = ""
-        return [bg] * len(row)
+        row_bgs.append(bg)
 
     earnings_mask = [bool(sub.iloc[i].get("earnings_in_window", False))
-                     for i in range(len(sub))]
+                     for i in range(n_rows)]
 
-    styled = disp.style.apply(_row_style, axis=1)
-    if any(earnings_mask) and "Earnings" in disp.columns:
-        styled = styled.apply(
-            lambda _: ["background-color: rgba(249,115,22,0.35)"
-                       if earnings_mask[i] else ""
-                       for i in range(len(disp))],
-            subset=["Earnings"],
-        )
+    style_matrix = pd.DataFrame("", index=disp.index, columns=disp.columns)
+    for i, bg in enumerate(row_bgs):
+        if bg:
+            style_matrix.iloc[i, :] = bg
+    if "Earnings" in disp.columns:
+        for i, has_earn in enumerate(earnings_mask):
+            if has_earn:
+                style_matrix.at[i, "Earnings"] = (
+                    "background-color: rgba(249,115,22,0.35)"
+                )
+
+    styled = disp.style.apply(lambda _: style_matrix, axis=None)
 
     col_cfg = {
         "DTE":        st.column_config.NumberColumn("DTE", format="%d", width="small"),
@@ -162,8 +191,14 @@ def _show_spreads_table(sub: pd.DataFrame, strategy_name: str,
         key=f"{key_prefix}_tbl_{strategy_name.replace(' ', '_').replace('/', '_').replace('×', 'x')}",
     )
     stamp_caption()
+    if truncated:
+        st.caption(
+            f"Showing top {_MAX_DISPLAY_ROWS} of {total} total — "
+            "tighten filters (POP, OI, width, |Δ|) to see different matches."
+        )
     selected_rows = event.selection.rows if hasattr(event, "selection") else []
-    return selected_rows[0] if selected_rows else None
+    selected_idx = selected_rows[0] if selected_rows else None
+    return selected_idx, sub
 
 
 def _render_view(
@@ -250,9 +285,17 @@ def _render_view(
 
     f1, f2, f3, f4, _, f5 = st.columns([2, 1, 1, 1, 1, 1.2], vertical_alignment="bottom")
     with f1:
-        min_pop_pct = st.slider("Min POP %", min_value=40, max_value=90,
-                                value=default_min_pop_pct, step=5,
-                                key=f"{key_prefix}_min_pop")
+        pop_range = st.slider(
+            "POP % range",
+            min_value=0, max_value=100,
+            value=(default_min_pop_pct, 100),
+            step=5,
+            key=f"{key_prefix}_pop_range",
+            help="Filter spreads whose probability of profit falls within "
+                 "this range. Drag the right handle to exclude near-certain "
+                 "trades; drag the left handle to set a minimum probability.",
+        )
+        min_pop_pct, max_pop_pct = pop_range
     with f2:
         sort_by = st.selectbox("Sort by",
                                ["Risk/Reward", "POP", "Expected Value", "Ann%"],
@@ -316,6 +359,7 @@ def _render_view(
                 max_width=float(max_width),
                 min_oi=int(min_oi),
                 min_pop=min_pop_pct / 100.0,
+                max_pop=max_pop_pct / 100.0,
                 sort_by=sort_by,
                 only_positive_theta=only_pos_theta,
                 only_positive_vega=only_pos_vega,
@@ -336,6 +380,7 @@ def _render_view(
             "errors": errors,
             "selected_strategies": selected_strategies,
             "min_pop_pct": min_pop_pct,
+            "max_pop_pct": max_pop_pct,
             "max_abs_delta": max_abs_delta,
         }
 
@@ -395,9 +440,12 @@ def _render_view(
     if df_r.empty:
         delta_hint = (f", |Δ| ≤ {res['max_abs_delta']:.2f}"
                       if include_delta_filter else "")
-        st.info(f"No spreads met the filters (POP ≥ {res['min_pop_pct']}%"
-                f"{delta_hint}). Try widening the spread width, lowering "
-                "Min POP, or selecting more strategies.")
+        st.info(
+            f"No spreads met the filters "
+            f"(POP {res['min_pop_pct']}%–{res.get('max_pop_pct', 100)}%"
+            f"{delta_hint}). Try widening the POP range or spread width, "
+            "or selecting more strategies."
+        )
         return
 
     for strategy_name in res["selected_strategies"]:
@@ -420,13 +468,19 @@ def _render_view(
             if strategy_name in ("Long Straddle", "Long Strangle"):
                 st.caption("ℹ Max profit is capped at 3× debit for ranking — "
                            "actual upside is unbounded.")
-            selected_idx = _show_spreads_table(sub, strategy_name, spot,
-                                                key_prefix=key_prefix)
+            selected_idx, displayed_sub = _show_spreads_table(
+                sub, strategy_name, spot, key_prefix=key_prefix
+            )
 
-            if selected_idx is not None and selected_idx < len(sub):
-                row = sub.iloc[selected_idx]
+            if (selected_idx is not None
+                    and 0 <= selected_idx < len(displayed_sub)):
+                row = displayed_sub.iloc[selected_idx]
                 st.markdown("**Payoff diagram**")
-                show_payoff_chart(row, spot)
+                safe_strat = (strategy_name.replace(" ", "_")
+                              .replace("/", "_").replace("×", "x"))
+                show_payoff_chart(
+                    row, spot, key_prefix=f"{key_prefix}_{safe_strat}"
+                )
 
                 # ── Monte Carlo for the selected multi-leg strategy ─────────
                 from options_scanner.spreads import build_legs_from_row

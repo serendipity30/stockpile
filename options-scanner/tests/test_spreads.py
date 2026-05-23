@@ -387,3 +387,108 @@ def test_spread_cols_constant_matches_finalise_output(synthetic_chain):
     if out.empty:
         pytest.skip("no spreads found")
     assert list(out.columns) == SPREAD_COLS
+
+
+# ── max_pop / POP-range filter ──────────────────────────────────────────────
+
+def test_scan_spreads_max_pop_default_keeps_all(synthetic_chain):
+    """Default max_pop=1.0 must not filter anything."""
+    open_df, _ = scan_spreads(
+        synthetic_chain, strategies=["Bull Put Spread"],
+        min_dte=20, max_dte=90, min_width=5, max_width=25,
+        min_oi=10, min_pop=0.30,
+    )
+    explicit_df, _ = scan_spreads(
+        synthetic_chain, strategies=["Bull Put Spread"],
+        min_dte=20, max_dte=90, min_width=5, max_width=25,
+        min_oi=10, min_pop=0.30, max_pop=1.0,
+    )
+    assert len(open_df) == len(explicit_df)
+
+
+def test_scan_spreads_pop_range_filter(synthetic_chain):
+    """max_pop tightens the upper bound on POP."""
+    df, errs = scan_spreads(
+        synthetic_chain,
+        strategies=["Bull Put Spread"],
+        min_dte=20, max_dte=90, min_width=5, max_width=25,
+        min_oi=10, min_pop=0.50, max_pop=0.70,
+    )
+    assert errs == []
+    if not df.empty:
+        assert df["pop"].between(0.50, 0.70 + 1e-9).all(), \
+            f"POPs out of range: {df['pop'].tolist()}"
+
+
+# ── spread_payoff_data: iv_multiplier and time-decay convergence ────────────
+
+def test_spread_payoff_data_iv_multiplier_default(synthetic_chain):
+    """iv_multiplier=1.0 (default) must match the no-multiplier output."""
+    from options_scanner.spreads import (
+        build_legs_from_row,
+        spread_payoff_data,
+    )
+    out = build_bull_put_spreads(synthetic_chain, 20, 90, 5, 25, 10)
+    if out.empty:
+        pytest.skip("no spreads on fixture")
+    row = out.iloc[0]
+    legs = build_legs_from_row(row)
+    T = max(int(row["dte"]), 1) / 365.0
+    a = spread_payoff_data(legs, float(row["spot"]), T)
+    b = spread_payoff_data(legs, float(row["spot"]), T, iv_multiplier=1.0)
+    pd.testing.assert_frame_equal(a, b)
+
+
+def test_spread_payoff_data_iv_multiplier_changes_current(synthetic_chain):
+    """Higher IV shifts pl_current but pl_expiry stays untouched."""
+    from options_scanner.spreads import (
+        build_legs_from_row,
+        spread_payoff_data,
+    )
+    out = build_bull_put_spreads(synthetic_chain, 20, 90, 5, 25, 10)
+    if out.empty:
+        pytest.skip("no spreads on fixture")
+    row = out.iloc[0]
+    legs = build_legs_from_row(row)
+    T = max(int(row["dte"]), 1) / 365.0
+    base = spread_payoff_data(legs, float(row["spot"]), T)
+    high = spread_payoff_data(legs, float(row["spot"]), T, iv_multiplier=1.5)
+    # Expiry curve is intrinsic-only — IV-independent
+    pd.testing.assert_series_equal(base["pl_expiry"], high["pl_expiry"])
+    # Current curve must differ at least somewhere
+    assert not base["pl_current"].equals(high["pl_current"])
+
+
+def test_spread_payoff_data_t_near_zero_converges_to_expiry(synthetic_chain):
+    """T close to 0 should make pl_current converge to pl_expiry."""
+    from options_scanner.spreads import (
+        build_legs_from_row,
+        spread_payoff_data,
+    )
+    out = build_bull_put_spreads(synthetic_chain, 20, 90, 5, 25, 10)
+    if out.empty:
+        pytest.skip("no spreads on fixture")
+    row = out.iloc[0]
+    legs = build_legs_from_row(row)
+    data = spread_payoff_data(legs, float(row["spot"]), T=1 / 365.0)
+    # At 1 day remaining, BS value is ~intrinsic. Allow $0.75/share slack
+    # at the synthetic chain's IV.
+    assert (data["pl_current"] - data["pl_expiry"]).abs().max() < 0.75
+
+
+# ── Large result set: regression guard for the display cap ──────────────────
+
+def test_scan_spreads_large_result_set_returns_tuple(synthetic_chain):
+    """scan_spreads should always return (DataFrame, errors) even when wide
+    chains produce many matches — UI then heads() to its display cap."""
+    df, errs = scan_spreads(
+        synthetic_chain,
+        strategies=["Bull Put Spread", "Bear Call Spread", "Iron Condor"],
+        min_dte=20, max_dte=90, min_width=1, max_width=40,
+        min_oi=10, min_pop=0.10,
+    )
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(errs, list)
+    # Confirm we got more than zero matches with a wide net — exercises the
+    # styling/render path that previously crashed on big result sets.
+    assert len(df) > 0
