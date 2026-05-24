@@ -93,11 +93,10 @@ _STYLES_CSS = (
 ).read_text(encoding="utf-8")
 st.markdown(f"<style>{_STYLES_CSS}</style>", unsafe_allow_html=True)
 
-# Dynamic accent colors via st.html() — injected fresh each rerun so
-# the button colors flip immediately when the data source toggle changes.
-# Kept separate from the static CSS so each mechanism does what it's
-# good at: st.markdown for layout/positioning, st.html for live updates.
-st.html(f"""<style>
+# Dynamic accent colors — injected fresh each rerun so button colors
+# flip immediately when the data source toggle changes. st.markdown is
+# used (not st.html) so the rules reach the main document.
+st.markdown(f"""<style>
 .stButton > button[kind="primary"],
 button[data-testid="stBaseButton-primary"] {{
     background-color: {_btn_bg} !important;
@@ -120,7 +119,7 @@ button[data-testid="stBaseButton-primary"]:hover {{
 [class*="st-key-data_source_pill"] button[data-testid*="Active"] p {{
     color: {_btn_bg} !important;
 }}
-</style>""")
+</style>""", unsafe_allow_html=True)
 
 # Brand wordmark pinned to the top header bar — needs st.markdown so
 # position:fixed in styles.css applies to the main document viewport.
@@ -145,12 +144,32 @@ _components.html(
     <script>
     (function() {
         const doc = window.parent.document;
-        const sync = () => {
+
+        // Sidebar-open state — drives pill positioning CSS.
+        const syncSidebar = () => {
             const sb = doc.querySelector('[data-testid="stSidebar"]');
             if (!sb) return;
             const w = sb.getBoundingClientRect().width;
             doc.body.dataset.sidebarOpen = w > 60 ? 'true' : 'false';
         };
+
+        // Theme detection — reads the actual rendered background of the
+        // Streamlit app container so we respond to the hamburger toggle,
+        // not just the OS preference. Sets data-osc-theme="dark"|"light"
+        // on <html> so CSS can branch on it.
+        const syncTheme = () => {
+            const app = doc.querySelector('[data-testid="stApp"]');
+            if (!app) return;
+            const bg = window.parent.getComputedStyle(app).backgroundColor;
+            const m = bg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+            if (!m) return;
+            const brightness = (+m[1] + +m[2] + +m[3]) / 3;
+            doc.documentElement.setAttribute(
+                'data-osc-theme', brightness < 80 ? 'dark' : 'light'
+            );
+        };
+
+        const sync = () => { syncSidebar(); syncTheme(); };
         sync();
         const obs = new MutationObserver(sync);
         obs.observe(doc.body, {

@@ -178,7 +178,7 @@ def tab_single() -> None:
             st.markdown(
                 "<div style='padding:0 0 0.4rem 1rem;'>"
                 + badge("MARKET HOURS RECOMMENDED", "warn")
-                + "<p style='color:#dc2626; font-weight:700; font-size:0.78rem; "
+                + "<p style='color:var(--osc-destructive); font-weight:700; font-size:0.78rem; "
                 "margin:0.45rem 0 0 0; line-height:1.4;'>"
                 "Pre/post-market quotes may be stale or missing — IV+pp "
                 "rankings depend on fresh data.</p></div>",
@@ -637,7 +637,8 @@ def tab_single() -> None:
         )
 
         # Side defaults from scan direction (buy=long, sell=short).
-        c_pick, c_side, c_qty, c_btn = st.columns([4, 1.2, 0.8, 1])
+        c_pick, c_side, c_qty, c_btn = st.columns([4, 1.2, 0.8, 1],
+                                                    vertical_alignment="bottom")
         with c_pick:
             choice_idx = st.selectbox(
                 "Candidate to analyze",
@@ -656,7 +657,6 @@ def tab_single() -> None:
             qty = st.number_input("Contracts", value=1, min_value=1,
                                   max_value=100, step=1, key="s_mc_qty")
         with c_btn:
-            st.write("")  # vertical-align nudge
             run_mc = st.button("Run MC", type="primary", key="s_mc_run")
 
         # Persist the trigger across reruns so the panel stays expanded.

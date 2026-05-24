@@ -233,7 +233,7 @@ def show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
     st.altair_chart(chart, use_container_width=True)
 
     st.markdown(
-        "<div style='font-size:0.8rem;line-height:1.9;color:#374151'>"
+        "<div style='font-size:0.8rem;line-height:1.9;color:var(--osc-ink-3)'>"
         "<span style='color:#10b981'>&#9632;&#9632; &mdash; &mdash;</span>"
         "&nbsp;<b>Green dashed</b> (Yahoo Finance)&nbsp;&nbsp;"
         "<span style='color:#3b82f6'>&#9632;&#9632; &mdash; &mdash;</span>"

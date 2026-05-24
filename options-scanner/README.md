@@ -125,6 +125,26 @@ Streamlit auto-reloads code, but `@st.cache_data` results survive
 across reruns. Open the hamburger menu (top-right) → **Clear cache** →
 rerun.
 
+**Orphan Python processes on Windows (port 8501 already in use)**
+If Streamlit was stopped with the terminal closed or crashed, Python
+processes can keep running and block port 8501 on the next launch.
+Kill them with a targeted PowerShell one-liner:
+
+```powershell
+Stop-Process -Id (Get-NetTCPConnection -LocalPort 8501).OwningProcess -Force
+```
+
+If that fails (nothing on 8501 yet but the launch still hangs), use
+the broader form — caution: this kills **all** Python processes:
+
+```powershell
+taskkill /F /IM python.exe
+```
+
+Recommendation: always kill orphan processes rather than leaving them
+running; they waste memory and will block the port on every future
+launch.
+
 **`ModuleNotFoundError` after a `git pull`**
 Dependencies changed. Run `uv sync` from the repo root.
 

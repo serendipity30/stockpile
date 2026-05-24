@@ -105,6 +105,25 @@ body[data-sidebar-open="true"] [class*="st-key-data_source_pill"] {
    reliably across Streamlit's injection boundary, so the colors
    must be baked into the rule text each rerun. */
 
+/* ── Dark mode overrides for fixed-position / layout elements ─────────── */
+/* ── Dark mode — fixed-position elements ─────────────────────────────── */
+/* Keyed on data-osc-theme set by the JS observer, not OS media query,
+   so these track the hamburger toggle. */
+html[data-osc-theme="dark"] [class*="st-key-data_source_pill"] [data-testid="stSegmentedControl"] {
+    background: rgba(30, 41, 59, 0.92) !important;
+    border-color: #334155 !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.40) !important;
+}
+html[data-osc-theme="dark"] [class*="st-key-rescan_pill"] .stButton > button {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+}
+html[data-osc-theme="dark"] .osc-wordmark-overlay .osc-wm-brand {
+    color: #F1F5F9;
+}
+html[data-osc-theme="dark"] .osc-wordmark-overlay .osc-wm-suffix {
+    color: #94A3B8;
+}
+
 /* Brand wordmark pinned to the top header bar. The matching <div>
    element is emitted from run_app.py (it's HTML body content, not
    styling). */

@@ -63,6 +63,33 @@ PALETTE: dict[str, str] = {
     "ink_4":        "#64748B",   # muted — 5.0:1
 }
 
+# Dark-mode palette — same brand hues, lighter surface/ink scale so
+# everything passes 4.5:1 on the #0F172A canvas.
+DARK_PALETTE: dict[str, str] = {
+    "primary":      "#3B82F6",   # slightly lighter for dark bg
+    "primary_fg":   "#FFFFFF",
+    "secondary":    "#60A5FA",
+    "accent":       "#F59E0B",
+    "ring":         "#3B82F6",
+
+    "background":   "#0F172A",   # slate-900
+    "foreground":   "#E2E8F0",   # slate-200
+    "card":         "#1E293B",   # slate-800
+    "card_fg":      "#CBD5E1",   # slate-300
+    "muted":        "#1E293B",
+    "muted_fg":     "#94A3B8",   # slate-400
+    "border":       "#334155",   # slate-700
+    "border_strong":"#475569",   # slate-600
+
+    "destructive":  "#EF4444",
+    "success":      "#10B981",
+
+    "ink_1":        "#F8FAFC",   # near-white — 17:1 on #0F172A
+    "ink_2":        "#E2E8F0",   # slate-200 — 11:1
+    "ink_3":        "#94A3B8",   # slate-400 — 6:1
+    "ink_4":        "#64748B",   # slate-500 — 3.5:1 (decorative only)
+}
+
 # Inter only. Numerics get tabular-nums via font-variant-numeric.
 _FONT_IMPORT = (
     "@import url('https://fonts.googleapis.com/css2?"
@@ -80,7 +107,8 @@ def inject_theme() -> None:
     tab styling, sidebar, buttons, inputs, dataframes, metrics, dividers,
     and helper classes for section_header / metric_card / badge.
     """
-    p = PALETTE
+    p  = PALETTE
+    dp = DARK_PALETTE
     css = f"""
     <style>
     {_FONT_IMPORT}
@@ -111,15 +139,26 @@ def inject_theme() -> None:
     }}
 
     /* ── Canvas ──────────────────────────────────────────────────────── */
-    html, body, [data-testid="stAppViewContainer"] {{
-      background-color: var(--osc-bg);
-      color: var(--osc-fg);
+    /* Font is always ours; background/text defer to Streamlit's theme so
+       the hamburger toggle works. Light-mode background is applied only
+       when our JS observer has confirmed light mode. */
+    html, body, .stApp,
+    [data-testid="stApp"],
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"] {{
       font-family: var(--osc-font);
     }}
-    [data-testid="stHeader"] {{
+    html[data-osc-theme="light"] body,
+    html[data-osc-theme="light"] [data-testid="stAppViewContainer"],
+    html[data-osc-theme="light"] [data-testid="stMain"],
+    html[data-osc-theme="light"] .block-container {{
+      background-color: {p["background"]};
+      color: {p["foreground"]};
+    }}
+    html[data-osc-theme="light"] [data-testid="stHeader"] {{
       background: rgba(248, 250, 252, 0.88);
       backdrop-filter: saturate(180%) blur(10px);
-      border-bottom: 1px solid var(--osc-border);
+      border-bottom: 1px solid {p["border"]};
     }}
 
     /* ── Typography ──────────────────────────────────────────────────── */
@@ -342,7 +381,7 @@ def inject_theme() -> None:
 
     /* ── Block container (page padding) ─────────────────────────────── */
     .block-container {{
-      padding-top: 1.25rem !important;
+      padding-top: 0 !important;
       padding-left: 1.5rem !important;
       padding-right: 1.5rem !important;
       max-width: 100% !important;
@@ -526,6 +565,33 @@ def inject_theme() -> None:
     }}
     .osc-footer a:hover {{ color: var(--osc-primary); border-bottom-color: var(--osc-primary); }}
 
+    /* ── Market View card ────────────────────────────────────────────── */
+    .mv-card {{
+      border-left: 3px solid;          /* colour set inline per stance */
+      background: var(--osc-card);
+      border-radius: var(--osc-radius-sm);
+      padding: 0.5rem 0.7rem;
+      font-family: var(--osc-font);
+      line-height: 1.45;
+      height: 100%;
+    }}
+    .mv-eyebrow {{
+      font-size: 0.65rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--osc-ink-4); margin-bottom: 2px;
+    }}
+    .mv-stance {{
+      font-size: 0.92rem; font-weight: 600;
+      cursor: pointer; list-style: none;
+      display: flex; align-items: center; gap: 5px;
+    }}
+    .mv-stance::-webkit-details-marker {{ display: none; }}
+    .mv-hint  {{ font-size: 0.65rem; color: var(--osc-ink-4); }}
+    .mv-body  {{ font-size: 0.78rem; color: var(--osc-ink-3);
+                 margin-top: 5px; margin-bottom: 4px; }}
+    .mv-eg    {{ font-size: 0.7rem; font-weight: 500;
+                 color: var(--osc-ink-4); font-style: italic; }}
+
     /* Empty / loading placeholder */
     .osc-empty {{
       background: var(--osc-card);
@@ -572,9 +638,48 @@ def inject_theme() -> None:
         transition-duration: 0.001ms !important;
       }}
     }}
+
+    /* ── Radio / checkbox label fix ─────────────────────────────────────── */
+    /* In dark mode Streamlit overrides label colours with high specificity.
+       Force them to our ink scale so they're always readable. */
+    html[data-osc-theme="dark"] [data-testid="stRadio"] label p,
+    html[data-osc-theme="dark"] [data-testid="stCheckbox"] label p,
+    html[data-osc-theme="dark"] [data-testid="stRadio"] [data-testid="stMarkdownContainer"] p,
+    html[data-osc-theme="dark"] [data-testid="stCheckbox"] [data-testid="stMarkdownContainer"] p {{
+      color: {dp["ink_2"]} !important;
+    }}
+
+    /* ── Dark mode — detected via JS observer, not OS media query ───────── */
+    /* data-osc-theme="dark" is set on <html> by the theme-detection script
+       in run_app.py whenever Streamlit's rendered background is dark.
+       This responds to the hamburger toggle regardless of OS preference. */
+    html[data-osc-theme="dark"] {{
+      --osc-primary:       {dp["primary"]};
+      --osc-secondary:     {dp["secondary"]};
+      --osc-accent:        {dp["accent"]};
+      --osc-ring:          {dp["ring"]};
+      --osc-bg:            {dp["background"]};
+      --osc-fg:            {dp["foreground"]};
+      --osc-card:          {dp["card"]};
+      --osc-card-fg:       {dp["card_fg"]};
+      --osc-muted:         {dp["muted"]};
+      --osc-muted-fg:      {dp["muted_fg"]};
+      --osc-border:        {dp["border"]};
+      --osc-border-strong: {dp["border_strong"]};
+      --osc-destructive:   {dp["destructive"]};
+      --osc-success:       {dp["success"]};
+      --osc-ink-1:         {dp["ink_1"]};
+      --osc-ink-2:         {dp["ink_2"]};
+      --osc-ink-3:         {dp["ink_3"]};
+      --osc-ink-4:         {dp["ink_4"]};
+    }}
+    html[data-osc-theme="dark"] [data-testid="stHeader"] {{
+      background: rgba(15, 23, 42, 0.92) !important;
+      border-bottom: 1px solid {dp["border"]} !important;
+    }}
     </style>
     """
-    st.html(css)
+    st.markdown(css, unsafe_allow_html=True)
 
 
 # ── Reusable rendering helpers ──────────────────────────────────────────────

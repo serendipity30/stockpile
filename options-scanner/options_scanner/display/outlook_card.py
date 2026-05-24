@@ -94,44 +94,21 @@ def render_outlook_card(buy: bool, opt_type: str) -> None:
     if not cfg:
         return
     accent = OUTLOOK_TONE_HEX[cfg["tone"]]
-    st.html(
+    # st.markdown (not st.html) so the card lives in the main document
+    # and picks up html[data-osc-theme] dark-mode rules from inject_theme().
+    st.markdown(
         f"""
-        <style>
-            details > summary {{ list-style: none; }}
-            details > summary::-webkit-details-marker {{ display: none; }}
-        </style>
-        <div style="
-            border-left: 3px solid {accent};
-            background: rgba(255,255,255,0.6);
-            border-radius: 6px;
-            padding: 0.5rem 0.7rem;
-            font-family: -apple-system, sans-serif;
-            line-height: 1.45;
-            height: 100%;
-        ">
-            <div style="font-size: 0.65rem; font-weight: 700;
-                        text-transform: uppercase; letter-spacing: 0.08em;
-                        color: #94a3b8; margin-bottom: 2px;">
-                Market view
-            </div>
+        <div class="mv-card" style="border-left-color:{accent};">
+            <div class="mv-eyebrow">Market view</div>
             <details>
-                <summary style="
-                    font-size: 0.92rem; font-weight: 600;
-                    color: {accent}; cursor: pointer;
-                    display: flex; align-items: center; gap: 5px;
-                ">
+                <summary class="mv-stance" style="color:{accent};">
                     {cfg['stance']}
-                    <span style="font-size: 0.65rem; color: #94a3b8;">▾</span>
+                    <span class="mv-hint">▾</span>
                 </summary>
-                <div style="font-size: 0.78rem; color: #475569;
-                            margin-top: 5px; margin-bottom: 4px;">
-                    {cfg['summary']}
-                </div>
-                <div style="font-size: 0.7rem; font-weight: 500;
-                            color: #64748b; font-style: italic;">
-                    e.g. {cfg['examples']}
-                </div>
+                <div class="mv-body">{cfg['summary']}</div>
+                <div class="mv-eg">e.g. {cfg['examples']}</div>
             </details>
         </div>
-        """
+        """,
+        unsafe_allow_html=True,
     )
