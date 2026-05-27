@@ -172,7 +172,7 @@ def show_gex_chart(df: pd.DataFrame, spot: float,
                 color="#0f172a",
             ),
         ).configure_view(strokeWidth=0),
-        use_container_width=True,
+        width='stretch',
     )
 
     provider_caveat = (

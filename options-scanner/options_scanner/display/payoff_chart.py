@@ -311,7 +311,7 @@ def show_payoff_chart(
     with c3:
         st.write("")  # vertical spacer to align the button
         if st.button("Reset", key=f"{key_prefix}_reset",
-                     use_container_width=True):
+                     width='stretch'):
             for k in (f"{key_prefix}_iv_mult", f"{key_prefix}_days_fwd"):
                 st.session_state.pop(k, None)
             st.rerun()
@@ -320,7 +320,7 @@ def show_payoff_chart(
     data = spread_payoff_data(legs, spot, T_sim, iv_multiplier=iv_mult)
 
     fig = _build_payoff_figure(row, data, legs, spot, dte, days_fwd, iv_mult)
-    st.plotly_chart(fig, use_container_width=True, theme=None,
+    st.plotly_chart(fig, width='stretch', theme=None,
                     key=f"{key_prefix}_fig")
 
     _show_payoff_footer(row, dte)

@@ -80,7 +80,7 @@ def show_gex_strikes_of_interest(df: pd.DataFrame, spot: float) -> None:
         "this strike tend to accelerate; sellers should size cautiously."
     )
     st.dataframe(
-        out, hide_index=True, use_container_width=False,
+        out, hide_index=True, width='content',
         column_config={
             "Tag":      st.column_config.TextColumn(),
             "Strike":   st.column_config.NumberColumn(format="$%.2f"),

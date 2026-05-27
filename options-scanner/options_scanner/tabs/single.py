@@ -227,7 +227,7 @@ def tab_single() -> None:
         with s_scan:
             with st.container(key="scan_btn_lift"):
                 scanned = st.button("Scan", type="primary",
-                                    use_container_width=True, key="s_scan_btn")
+                                    width='stretch', key="s_scan_btn")
         with s_mh:
             st.markdown(
                 "<div style='display:flex; align-items:center; "

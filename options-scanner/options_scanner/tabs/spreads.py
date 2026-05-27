@@ -307,7 +307,7 @@ def _render_view(
         only_pos_vega = st.checkbox("ν > 0 only", key=f"{key_prefix}_pos_vega")
     with f5:
         scanned = st.button(f"Scan {tab_label}", type="primary",
-                            use_container_width=True,
+                            width='stretch',
                             key=f"{key_prefix}_scan_btn")
 
     # ── Scan ──────────────────────────────────────────────────────────────────

@@ -285,7 +285,7 @@ def show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
             color="#0f172a",
         ),
     )
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, width='stretch')
 
     st.markdown(
         "<div style='font-size:0.8rem;line-height:1.9;color:var(--osc-ink-3)'>"

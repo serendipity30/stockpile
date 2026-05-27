@@ -63,7 +63,7 @@ def tab_gex() -> None:
         with sc:
             with st.container(key="gex_scan_btn_lift"):
                 scanned = st.button("Scan", type="primary",
-                                    use_container_width=True,
+                                    width='stretch',
                                     key="g_scan_btn")
         with expl:
             st.markdown(
@@ -209,7 +209,7 @@ def tab_gex() -> None:
             "Top Amp cells include each strike's distance from spot."
         )
         st.dataframe(
-            summary_df, hide_index=True, use_container_width=False,
+            summary_df, hide_index=True, width='content',
             column_config={
                 "Ticker":    st.column_config.TextColumn(),
                 "Spot":      st.column_config.NumberColumn(format="$%.2f"),
