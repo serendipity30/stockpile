@@ -52,7 +52,7 @@ def _parse_rows_to_transactions(rows):
         # Record as "Transfer In" so compute_status can flag the position as
         # Inconsistent until the original buy transactions are located.
         if action == "Internal Transfer":
-            qty = abs(int(float(qty_s.replace(",", "")))) if qty_s and re.search(r"\d", qty_s) else ""
+            qty = abs(float(qty_s.replace(",", ""))) if qty_s and re.search(r"\d", qty_s) else ""
             if qty == "" or qty <= 0:
                 continue
             transactions.append([
@@ -77,7 +77,7 @@ def _parse_rows_to_transactions(rows):
             strike = ""
             opt_type = "Stock"
 
-        qty = abs(int(float(qty_s.replace(",", "")))) if qty_s and re.search(r"\d", qty_s) else ""
+        qty = abs(float(qty_s.replace(",", ""))) if qty_s and re.search(r"\d", qty_s) else ""
         price = parse_dollar(price_s)
         fees = parse_dollar(fees_s)
         amount = parse_dollar(amount_s)

@@ -57,18 +57,24 @@ def get_portfolio(csv_path: str, brokerage: str) -> list[dict]:
 
     positions = []
     for ticker, txns in sorted(ticker_txns.items()):
-        shares = 0
+        # txns is sorted oldest-first by the parser. Walk in order so a
+        # "Transfer In" (TDA->Schwab broker migration) acts as an authoritative
+        # balance snapshot that resets the running total — any prior Buys/Sells
+        # in the CSV are already baked into that transferred quantity.
+        shares = 0.0
         for row in txns:
             _, action, opt_type, _, _, _, qty, *_ = row
             if opt_type != "Stock" or qty == "":
                 continue
-            q = int(qty)
-            if action == "Buy":
+            q = float(qty)
+            if action == "Transfer In":
+                shares = q                      # snapshot reset, not delta
+            elif action in ("Buy", "Reinvest Shares"):
                 shares += q
             elif action == "Sell":
                 shares -= q
 
-        if shares <= 0:
+        if shares <= 0.001:                     # float-safe zero check
             continue
 
         open_opts = detect_open_positions(txns)

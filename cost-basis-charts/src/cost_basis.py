@@ -77,7 +77,7 @@ def compute_cost_basis_series(transactions):
     """
     lots = deque()       # [(date, qty_remaining, cost_per_share), ...]
     fifo_total = 0.0     # sum of remaining lot costs: qty * cost_per_share
-    shares_held = 0
+    shares_held = 0.0    # float to capture dividend-reinvest fractions
     adjustment = 0.0     # cumulative net premiums + dividends (positive = lowers cost)
     total_income = 0.0   # same cash flows as adjustment but never scaled on sells
 
@@ -94,7 +94,8 @@ def compute_cost_basis_series(transactions):
         except (ValueError, TypeError):
             continue
 
-        qty_i = int(qty) if qty not in ("", None) else 0
+        qty_f = float(qty) if qty not in ("", None) else 0.0
+        qty_i = int(qty_f)   # integer contract count for option display/matching
         price_f = float(price) if price not in ("", None) else 0.0
         amount_f = float(amount) if amount not in ("", None) else 0.0
 
@@ -102,22 +103,52 @@ def compute_cost_basis_series(transactions):
         affects = None
 
         if opt_type == "Stock":
-            if action in ("Buy", "Transfer In"):
-                fifo_total += qty_i * price_f
-                shares_held += qty_i
-                lots.append((txn_date, qty_i, price_f))
-                if action == "Transfer In" and price_f == 0:
-                    label = f"Transfer In {qty_i} shrs"
+            if action in ("Buy", "Reinvest Shares"):
+                fifo_total += qty_f * price_f
+                shares_held += qty_f
+                lots.append((txn_date, qty_f, price_f))
+                if action == "Reinvest Shares":
+                    label = f"Reinvest {qty_f:.4f} @ ${price_f:.2f}"
                 else:
-                    label = f"Buy {qty_i} @ ${price_f:.2f}"
+                    label = f"Buy {qty_f:g} @ ${price_f:.2f}"
                 affects = "fifo"
 
-            elif action == "Sell" and shares_held > 0:
+            elif action == "Transfer In":
+                # Authoritative balance snapshot from broker migration (e.g.
+                # TDA->Schwab). Reconcile our running count to the broker's
+                # authoritative quantity by either adding a synthetic lot
+                # (pre-CSV history) or trimming FIFO lots (CSV anomaly inflated
+                # the count, e.g. an unmatched Sell+Buy pair).
+                diff = qty_f - shares_held
+                if diff > 0.001:
+                    fifo_total += diff * price_f  # price_f usually 0
+                    shares_held += diff
+                    lots.append((txn_date, diff, price_f))
+                    label = f"Transfer In {diff:g} shrs (pre-CSV)"
+                    affects = "fifo"
+                elif diff < -0.001:
+                    excess = -diff
+                    while excess > 0.001 and lots:
+                        lot_date, lot_qty, lot_price = lots[0]
+                        if lot_qty <= excess + 1e-9:
+                            fifo_total -= lot_qty * lot_price
+                            shares_held -= lot_qty
+                            excess -= lot_qty
+                            lots.popleft()
+                        else:
+                            fifo_total -= excess * lot_price
+                            shares_held -= excess
+                            lots[0] = (lot_date, lot_qty - excess, lot_price)
+                            excess = 0
+                    label = f"Transfer In reconcile to {qty_f:g} shrs"
+                    affects = "fifo"
+
+            elif action == "Sell" and shares_held > 0.001:
                 old_shares = shares_held
-                remaining = qty_i
-                while remaining > 0 and lots:
+                remaining = qty_f
+                while remaining > 0.001 and lots:
                     lot_date, lot_qty, lot_price = lots[0]
-                    if lot_qty <= remaining:
+                    if lot_qty <= remaining + 1e-9:
                         fifo_total -= lot_qty * lot_price
                         shares_held -= lot_qty
                         remaining -= lot_qty
@@ -130,7 +161,7 @@ def compute_cost_basis_series(transactions):
                 # Adjustment is tied to shares — scale it down proportionally
                 if old_shares > 0:
                     adjustment *= shares_held / old_shares
-                label = f"Sell {qty_i} @ ${price_f:.2f}"
+                label = f"Sell {qty_f:g} @ ${price_f:.2f}"
                 affects = "fifo"
 
         elif opt_type in ("Call", "Put"):
@@ -159,7 +190,7 @@ def compute_cost_basis_series(transactions):
             label = f"Dividend +${amount_f:.2f}"
             affects = "adjusted"
 
-        if shares_held > 0:
+        if shares_held > 0.001:
             fifo_cost = fifo_total / shares_held
             adjusted_cost = (fifo_total - adjustment) / shares_held
             series.append({

@@ -59,7 +59,12 @@ def detect_suspicious_positions(transactions, open_positions):
     today = date.today()
     warnings = []
 
-    net_shares = 0
+    # transactions are oldest-first; treat Transfer In as an authoritative
+    # balance snapshot (TDA->Schwab migration) that resets the running total,
+    # since any pre-transfer Buy/Sell rows are already baked into that quantity.
+    # stock_buys still only records real Buy executions — those are what Signal 3
+    # looks for when detecting assignment-shaped patterns.
+    net_shares = 0.0
     stock_buys = []  # [(date_obj, price_per_share), ...]
     for row in transactions:
         date_str, action, opt_type, _, _, _, qty, price, _, _, _ = row
@@ -68,12 +73,16 @@ def detect_suspicious_positions(transactions, open_positions):
         m = re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})", date_str)
         if not m:
             continue
-        q = int(qty)
+        q = float(qty)
         d = date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
-        if action == "Buy":
+        if action == "Transfer In":
+            net_shares = q                      # snapshot reset, not delta
+        elif action == "Buy":
             net_shares += q
             if price != "":
                 stock_buys.append((d, float(price)))
+        elif action == "Reinvest Shares":
+            net_shares += q
         elif action == "Sell":
             net_shares -= q
 
@@ -97,7 +106,7 @@ def detect_suspicious_positions(transactions, open_positions):
             continue
 
         # Signal 2: open call but no shares held
-        if opt_type == "Call" and net_shares <= 0:
+        if opt_type == "Call" and net_shares <= 0.001:
             warnings.append(
                 f"open {opt_type} {sym} but no shares held — "
                 "check for missing Assigned transaction"
@@ -216,7 +225,10 @@ def compute_avg_held_anchor(transactions):
     for currently-held shares, or None if no shares are held.
 
     Stock Sell rows consume lots FIFO — so shares that have been sold no
-    longer contribute to the weighted average.
+    longer contribute to the weighted average. Reinvest Shares add lots at
+    the reinvest date. Transfer In acts as a balance snapshot: any missing
+    quantity (pre-CSV history) gets a synthetic lot at the transfer date,
+    which is the best approximation available without the original buy dates.
     """
     lots = []  # [[date, shares_remaining], ...], chronological order
     for row in transactions:
@@ -227,13 +239,30 @@ def compute_avg_held_anchor(transactions):
         if not m:
             continue
         lot_date = date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
-        q = int(qty)
-        if action == "Buy":
+        q = float(qty)
+        if action in ("Buy", "Reinvest Shares"):
             lots.append([lot_date, q])
+        elif action == "Transfer In":
+            # Reconcile to authoritative broker balance: add a synthetic lot
+            # for missing pre-CSV history, or trim FIFO lots if our running
+            # count is inflated by CSV anomalies.
+            tracked = sum(s for _, s in lots)
+            diff = q - tracked
+            if diff > 0.001:
+                lots.append([lot_date, diff])
+            elif diff < -0.001:
+                excess = -diff
+                while excess > 0.001 and lots:
+                    if lots[0][1] <= excess + 1e-9:
+                        excess -= lots[0][1]
+                        lots.pop(0)
+                    else:
+                        lots[0][1] -= excess
+                        excess = 0
         elif action == "Sell":
             remaining = q
-            while remaining > 0 and lots:
-                if lots[0][1] <= remaining:
+            while remaining > 0.001 and lots:
+                if lots[0][1] <= remaining + 1e-9:
                     remaining -= lots[0][1]
                     lots.pop(0)
                 else:
@@ -241,7 +270,7 @@ def compute_avg_held_anchor(transactions):
                     remaining = 0
 
     total = sum(shares for _, shares in lots)
-    if total == 0:
+    if total < 0.001:
         return None
     EPOCH = date(1899, 12, 30)
     weighted = round(sum((d - EPOCH).days * s for d, s in lots) / total)
@@ -257,8 +286,8 @@ def compute_closed_avg_days(transactions):
     passes after the close.  Returns None if no sells were matched to buys.
     """
     lots = []  # [[buy_date, shares_remaining], ...]
-    total_share_days = 0
-    total_shares = 0
+    total_share_days = 0.0
+    total_shares = 0.0
     for row in transactions:
         date_str, action, opt_type, _sym, _strike, _exp, qty, _, _, _, _ = row
         if opt_type != "Stock" or qty == "":
@@ -267,13 +296,28 @@ def compute_closed_avg_days(transactions):
         if not m:
             continue
         lot_date = date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
-        q = int(qty)
-        if action == "Buy":
+        q = float(qty)
+        if action in ("Buy", "Reinvest Shares"):
             lots.append([lot_date, q])
+        elif action == "Transfer In":
+            # Reconcile to authoritative broker balance (see compute_avg_held_anchor).
+            tracked = sum(s for _, s in lots)
+            diff = q - tracked
+            if diff > 0.001:
+                lots.append([lot_date, diff])
+            elif diff < -0.001:
+                excess = -diff
+                while excess > 0.001 and lots:
+                    if lots[0][1] <= excess + 1e-9:
+                        excess -= lots[0][1]
+                        lots.pop(0)
+                    else:
+                        lots[0][1] -= excess
+                        excess = 0
         elif action == "Sell":
             remaining = q
-            while remaining > 0 and lots:
-                if lots[0][1] <= remaining:
+            while remaining > 0.001 and lots:
+                if lots[0][1] <= remaining + 1e-9:
                     days = (lot_date - lots[0][0]).days
                     total_share_days += days * lots[0][1]
                     total_shares += lots[0][1]
@@ -285,7 +329,7 @@ def compute_closed_avg_days(transactions):
                     total_shares += remaining
                     lots[0][1] -= remaining
                     remaining = 0
-    if total_shares == 0:
+    if total_shares < 0.001:
         return None
     return round(total_share_days / total_shares)
 
@@ -302,15 +346,15 @@ def compute_status(transactions, open_positions):
     if any(row[1] == "Transfer In" for row in transactions):
         issues.append("position includes a broker transfer — locate original buy transactions to resolve")
 
-    shares = 0
+    shares = 0.0
     for row in transactions:
         _, action, opt_type, _sym, _, _, qty, _, _, _, _ = row
         if opt_type == "Stock" and qty != "":
             if action == "Buy":
-                shares += int(qty)
+                shares += float(qty)
             elif action == "Sell":
-                shares -= int(qty)
-            if shares < 0:
+                shares -= float(qty)
+            if shares < -0.001:
                 issues.append("share count went negative")
                 break
 
@@ -330,6 +374,6 @@ def compute_status(transactions, open_positions):
 
     if issues:
         return "Inconsistent", issues
-    if shares <= 0 and not open_positions:
+    if shares <= 0.001 and not open_positions:
         return "Closed", []
     return "Consistent", []
