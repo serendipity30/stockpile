@@ -19,9 +19,10 @@
     --pill-top:               13px;
     --sidebar-shift:          15rem;
 
-    --rescan-pill-left:       4.5rem;     /* clears the sidebar >> chevron */
-    --data-source-pill-left:  14rem;
-    --surface-fit-pill-left:  32rem;
+    --rescan-pill-left:        4.5rem;     /* clears the sidebar >> chevron */
+    --data-source-pill-left:   14rem;
+    --data-source-pill-width:  24rem;     /* tune if Moomoo label width changes */
+    --surface-fit-pill-left:   calc(var(--data-source-pill-left) + var(--data-source-pill-width) - 30px);
 
     /* z-index layering for the fixed-position pills. They sit above
        Streamlit's own chrome (which tops out around 999000). */
