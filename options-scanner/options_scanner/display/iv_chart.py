@@ -81,6 +81,8 @@ def show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
         frame["FittedIV%"] = (frame["iv_fitted"] * 100).round(2)
         frame["IV+pp"]     = (frame["iv_excess"] * 100).round(2)
         frame["Ann%"]      = frame["ann_yield_pct"].round(2)
+        frame["Spread"]    = (frame["ask"] - frame["bid"]).round(2)
+        frame["Last"]      = frame["last"].where(frame["last"] > 0)
         if _show_score:
             frame[_score_kind] = (frame["signal_score"] * _mult).round(2)
         return frame
@@ -282,6 +284,8 @@ def show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
         alt.Tooltip("open_interest:Q", title="OI"),
         alt.Tooltip("bid:Q",          title="Bid",             format="$.2f"),
         alt.Tooltip("ask:Q",          title="Ask",             format="$.2f"),
+        alt.Tooltip("Spread:Q",       title="Spread",          format="$.2f"),
+        alt.Tooltip("Last:Q",         title="Last",            format="$.2f"),
         *([alt.Tooltip("in_fit:N", title="In surface fit")]
           if "in_fit" in sub.columns else []),
     ]

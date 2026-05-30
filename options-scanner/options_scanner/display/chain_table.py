@@ -26,11 +26,13 @@ from options_scanner import iv_scores
 from options_scanner.ui_theme import empty_state
 
 from options_scanner.display.chain_styling import (
-    BID_HELP,
+    SPREAD_HELP,
+    LAST_HELP,
     CELL_WARN,
     OI_HELP,
     vol_help_for,
     ivpp_help_for,
+    last_outside_mask,
     low_oi_mask,
     low_vol_mask,
     wide_spread_mask,
@@ -70,6 +72,10 @@ def show_chain_table(df_exp: pd.DataFrame, buy: bool, mode: str,
         "Bid":    df_s["bid"].round(2),
         "Ask":    df_s["ask"].round(2),
         "Mid":    df_s["mid"].round(2),
+        "Spread": (df_s["ask"] - df_s["bid"]).round(2),
+        "Last":   (df_s["last"].where(df_s["last"] > 0)
+                   if "last" in df_s.columns
+                   else pd.Series([float("nan")] * len(df_s), index=df_s.index)),
         "IV%":    (df_s["iv"] * 100).round(1),
         "IV+pp":  (df_s["iv_excess"] * 100).round(1),
     })
@@ -120,6 +126,8 @@ def show_chain_table(df_exp: pd.DataFrame, buy: bool, mode: str,
 
     # Cell-level overrides for spread, OI, and vol (applied after row bg).
     wide    = wide_spread_mask(df_s["bid"], df_s["ask"], df_s["mid"])
+    last_out = (last_outside_mask(df_s["last"], df_s["bid"], df_s["ask"])
+                if "last" in df_s.columns else [False] * len(df_s))
     lo      = low_oi_mask(df_s["open_interest"], min_oi)
     low_vol = low_vol_mask(df_s["volume"], min_vol)
 
@@ -127,7 +135,9 @@ def show_chain_table(df_exp: pd.DataFrame, buy: bool, mode: str,
         disp.style
         .apply(_row_bg, axis=1)
         .apply(lambda _: [CELL_WARN if w else "" for w in wide],
-               subset=["Bid", "Ask"])
+               subset=["Spread"])
+        .apply(lambda _: [CELL_WARN if o else "" for o in last_out],
+               subset=["Last"])
         .apply(lambda _: [CELL_WARN if l else "" for l in lo],
                subset=["OI"])
         .apply(lambda _: [CELL_WARN if v else "" for v in low_vol],
@@ -145,11 +155,15 @@ def show_chain_table(df_exp: pd.DataFrame, buy: bool, mode: str,
         "Strike": st.column_config.TextColumn("Strike", width=75),
         "DTE":   st.column_config.NumberColumn("DTE", format="%d", width=55),
         "Bid":   st.column_config.NumberColumn("Bid", format="$%.2f",
-                                               width=70, help=BID_HELP),
+                                               width=70),
         "Ask":   st.column_config.NumberColumn("Ask", format="$%.2f",
-                                               width=70, help=BID_HELP),
+                                               width=70),
         "Mid":   st.column_config.NumberColumn("Mid", format="$%.2f",
                                                width=70),
+        "Spread": st.column_config.NumberColumn("Spread", format="$%.2f",
+                                                width=75, help=SPREAD_HELP),
+        "Last":  st.column_config.NumberColumn("Last", format="$%.2f",
+                                               width=70, help=LAST_HELP),
         "IV%":   st.column_config.NumberColumn("IV%", format="%.1f%%",
                                                width=70),
         "IV+pp": st.column_config.NumberColumn("IV+pp", format="%+.1f pp",

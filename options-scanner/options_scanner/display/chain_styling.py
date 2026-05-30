@@ -6,9 +6,10 @@ here:
 
 1. The yellow warning highlight (`CELL_WARN`) used to flag wide
    spreads, low OI, and low daily volume rows.
-2. Mask helpers (`wide_spread_mask`, `low_oi_mask`, `low_vol_mask`)
-   that decide *which* rows in a chain get the warning highlight.
-3. The hover-help tooltips for the Bid/Ask, OI, Vol, and IV+pp
+2. Mask helpers (`wide_spread_mask`, `last_outside_mask`,
+   `low_oi_mask`, `low_vol_mask`) that decide *which* rows in a chain
+   get the warning highlight.
+3. The hover-help tooltips for the Spread, Last, OI, Vol, and IV+pp
    column headers. `ivpp_help_for` is a small factory because the
    sign convention flips for buyers vs sellers — surfacing that in
    the tooltip itself saves users from having to remember it.
@@ -21,8 +22,12 @@ import pandas as pd
 
 CELL_WARN = "background-color: rgba(234,179,8,0.45)"
 
-BID_HELP = ("Yellow: spread is wider than 1.5× the median for this table"
-            " — higher execution cost.")
+SPREAD_HELP = ("Spread = Ask − Bid. Yellow: spread is wider than 1.5× the"
+               " median for this table — higher execution cost.")
+
+LAST_HELP = ("Last traded price. Yellow: the last trade printed outside the"
+             " current bid-ask range — likely stale or off-market, so treat"
+             " it with caution.")
 
 OI_HELP = ("Yellow: OI is below 2× the min OI filter"
            " — limited liquidity, harder to fill at a good price.")
@@ -46,6 +51,21 @@ def wide_spread_mask(bid: pd.Series, ask: pd.Series,
     median = vals[len(vals) // 2] if vals else 0.0
     thresh = max(median * 1.5, 0.15)
     return [r > thresh for r in ratios]
+
+
+def last_outside_mask(last: pd.Series, bid: pd.Series,
+                      ask: pd.Series) -> list[bool]:
+    """Flag rows whose last trade printed outside the live bid-ask range.
+
+    Only flags when there is a real last price and a two-sided quote
+    (last, bid, ask all > 0); a last below the bid or above the ask means
+    the print is stale or off-market relative to the current quote, so the
+    Last value shouldn't be trusted as a fill reference.
+    """
+    return [
+        (l > 0 and b > 0 and a > 0 and (l < b or l > a))
+        for l, b, a in zip(last.tolist(), bid.tolist(), ask.tolist())
+    ]
 
 
 def low_oi_mask(oi: pd.Series, min_oi: int) -> list[bool]:

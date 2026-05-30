@@ -21,11 +21,13 @@ from options_scanner import iv_scores
 from options_scanner.ui_theme import empty_state
 
 from options_scanner.display.chain_styling import (
-    BID_HELP,
+    SPREAD_HELP,
+    LAST_HELP,
     CELL_WARN,
     OI_HELP,
     vol_help_for,
     ivpp_help_for,
+    last_outside_mask,
     low_oi_mask,
     low_vol_mask,
     wide_spread_mask,
@@ -64,6 +66,7 @@ def show_df(sub: pd.DataFrame, roll_close_cost: float | None = None,
         "Bid":    sub["bid"].round(2),
         "Ask":    sub["ask"].round(2),
         "Mid":    sub["mid"].round(2),
+        "Spread": (sub["ask"] - sub["bid"]).round(2),
         "Last":   sub["last"].where(sub["last"] > 0) if "last" in sub.columns else pd.Series([float("nan")] * len(sub), index=sub.index),
         "IV%":    (sub["iv"] * 100).round(1),
         "IV+pp":  (sub["iv_excess"] * 100).round(1),
@@ -83,13 +86,17 @@ def show_df(sub: pd.DataFrame, roll_close_cost: float | None = None,
         disp["NetCr"] = (sub["mid"] - roll_close_cost).round(2)
 
     wide = wide_spread_mask(sub["bid"], sub["ask"], sub["mid"])
+    last_out = (last_outside_mask(sub["last"], sub["bid"], sub["ask"])
+                if "last" in sub.columns else [False] * len(sub))
     lo = low_oi_mask(sub["open_interest"], min_oi)
     low_vol = low_vol_mask(sub["volume"], min_vol)
 
     styled = (
         disp.style
         .apply(lambda _: [CELL_WARN if w else "" for w in wide],
-               subset=["Bid", "Ask"])
+               subset=["Spread"])
+        .apply(lambda _: [CELL_WARN if o else "" for o in last_out],
+               subset=["Last"])
         .apply(lambda _: [CELL_WARN if l else "" for l in lo],
                subset=["OI"])
         .apply(lambda _: [CELL_WARN if v else "" for v in low_vol],
@@ -105,13 +112,15 @@ def show_df(sub: pd.DataFrame, roll_close_cost: float | None = None,
         "Expiration": st.column_config.TextColumn("Expiration", width=105),
         "DTE":   st.column_config.NumberColumn("DTE", format="%d", width=55),
         "Bid":   st.column_config.NumberColumn("Bid", format="$%.2f",
-                                               width=70, help=BID_HELP),
+                                               width=70),
         "Ask":   st.column_config.NumberColumn("Ask", format="$%.2f",
-                                               width=70, help=BID_HELP),
+                                               width=70),
         "Mid":   st.column_config.NumberColumn("Mid", format="$%.2f",
                                                width=70),
+        "Spread": st.column_config.NumberColumn("Spread", format="$%.2f",
+                                                width=75, help=SPREAD_HELP),
         "Last":  st.column_config.NumberColumn("Last", format="$%.2f",
-                                               width=70),
+                                               width=70, help=LAST_HELP),
         "IV%":   st.column_config.NumberColumn("IV%", format="%.1f%%",
                                                width=70),
         "IV+pp": st.column_config.NumberColumn("IV+pp", format="%+.1f pp",
