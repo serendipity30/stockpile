@@ -40,7 +40,10 @@ def fetch_yfinance(symbol: str, interval: str, limit: int = 200) -> list:
     _rate_limit()
     yf_iv = _YF_INTERVAL.get(interval, "1d")
     period = _YF_PERIOD.get(yf_iv, "1y")
-    ticker = yf.Ticker(symbol, session=_SESSION)
+    # yfinance >= 0.2.52 manages its own curl_cffi session; passing a plain
+    # requests.Session raises "Yahoo API requires curl_cffi session". Let YF
+    # handle it. The shared _SESSION is still used for Hyperliquid below.
+    ticker = yf.Ticker(symbol)
     df = ticker.history(period=period, interval=yf_iv, auto_adjust=True, timeout=15)
     if df is None or df.empty:
         raise ValueError(f"yfinance: no data for '{symbol}'")
