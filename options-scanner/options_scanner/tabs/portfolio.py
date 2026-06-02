@@ -23,6 +23,7 @@ from datetime import date, datetime
 import streamlit as st
 
 from options_scanner.display.iv_chart import show_iv_chart
+from options_scanner.display.leaderboard import render_leaderboard
 from options_scanner.display.portfolio_action_card import render_portfolio_action_card
 from options_scanner.display.scan_results import show_scan_results
 from options_scanner.display.spot_meta import (
@@ -159,6 +160,91 @@ def _show_validation(issues: list, row_count: int, parse_error: str | None,
     return not errors
 
 
+def _parse_watchlist(text: str) -> list[str]:
+    """Parse a free-text watchlist into a deduped, normalized ticker list.
+
+    Accepts commas, whitespace, or newlines as separators. Order is
+    preserved (first occurrence wins).
+    """
+    from stocks_shared.yahoo import normalize_ticker
+    raw = text.replace(",", " ").split()
+    seen: dict[str, None] = {}
+    for tok in raw:
+        t = normalize_ticker(tok)
+        if t:
+            seen.setdefault(t, None)
+    return list(seen.keys())
+
+
+def _scan_one(pos: dict, opt_type_key: str, scan_mode_key: str,
+              provider: str, scfg: dict | None,
+              min_dte: int, max_dte: int) -> dict:
+    """Fetch + enrich one position and build its result dict.
+
+    Shared by both input sources. Watchlist tickers pass a synthetic
+    position (`shares=0`, no open options), so the roll-close-cost block
+    below is skipped and the position scans as "best option" only.
+    """
+    ticker = pos["ticker"]
+    df, earnings_dates, err = fetch_position(
+        ticker, int(min_dte), provider, scfg,
+        moomoo_config=st.session_state.get("moomoo_config"),
+        opt_type=opt_type_key,
+        max_dte=int(max_dte),
+    )
+
+    # Roll close cost lookup — only in Roll mode, only for open options
+    # on the relevant side(s).
+    roll_close_costs = {}
+    if scan_mode_key == "roll":
+        opts_to_lookup = []
+        if opt_type_key in ("calls", "both"):
+            opts_to_lookup += [(opt, "calls") for opt in pos["open_calls"]]
+        if opt_type_key in ("puts", "both"):
+            opts_to_lookup += [(opt, "puts") for opt in pos["open_puts"]]
+
+        _schwab_client = None
+        if provider == "schwab" and opts_to_lookup:
+            from stocks_shared.schwab_live import get_client
+            try:
+                _schwab_client = get_client(
+                    scfg["app_key"], scfg["app_secret"],
+                    scfg["callback_url"], scfg["token_file"],
+                )
+            except (ValueError, TypeError):
+                pass
+
+        for opt, side in opts_to_lookup:
+            m, d, y = opt["expiration"].split("/")
+            exp_yf = f"{y}-{m}-{d}"
+            if provider == "schwab" and _schwab_client is not None:
+                from stocks_shared.schwab_live import fetch_option_chain_schwab
+                chain = fetch_option_chain_schwab(_schwab_client, ticker, exp_yf)
+            else:
+                from stocks_shared.yahoo import fetch_option_chain
+                chain = fetch_option_chain(ticker, exp_yf)
+            if chain is None:
+                continue
+            chain_df = chain.calls if side == "calls" else chain.puts
+            row = chain_df[chain_df["strike"] == float(opt["strike"])]
+            if not row.empty:
+                bid  = float(row["bid"].iloc[0] or 0)
+                ask  = float(row["ask"].iloc[0] or 0)
+                last = float(row["lastPrice"].iloc[0] or 0)
+                roll_close_costs[opt["symbol"]] = (
+                    (bid + ask) / 2 if bid > 0 and ask > 0 else last
+                )
+
+    return {
+        "position": pos,
+        "error": err,
+        "df": df,
+        "spot": float(df["spot"].iloc[0]) if not df.empty else None,
+        "earnings_dates": earnings_dates,
+        "roll_close_costs": roll_close_costs,
+    }
+
+
 def tab_portfolio() -> None:
     section_header(
         title="Portfolio scan",
@@ -166,54 +252,82 @@ def tab_portfolio() -> None:
             "Upload a brokerage CSV — we'll surface roll candidates and rich "
             "options ticker-by-ticker."
         ),
-        eyebrow="STEP 01 · UPLOAD",
+        eyebrow="STEP 01 · INPUT",
     )
-    # ── Upload row: file picker (50 %) + format selector (25 %) + spacer ──────
-    _up_col, _fmt_col, _ = st.columns([2, 1, 1])
-    with _up_col:
-        uploaded = st.file_uploader("Brokerage CSV export", type=["csv"])
-        st.markdown(
-            "<div style='margin: 0.2rem 0 0 0;'>"
-            + badge("PROCESSED LOCALLY · NEVER UPLOADED", "positive")
-            + "</div>",
-            unsafe_allow_html=True,
-        )
 
-    # ── Auto-detect format on new file upload ────────────────────────────────
-    if uploaded is not None:
-        _file_sig = f"{uploaded.name}:{len(uploaded.getvalue())}"
-        if st.session_state.get("_port_file_sig") != _file_sig:
-            _detected = detect_brokerage(uploaded.getvalue())
-            st.session_state["_port_file_sig"] = _file_sig
-            st.session_state["_port_auto_detected"] = _detected
-            st.session_state["_port_detect_ran"] = True
-            if _detected:
-                st.session_state["p_brokerage"] = _detected
+    # ── Input source: brokerage CSV (today's flow) vs typed watchlist ─────────
+    input_source = st.radio(
+        "Input source", ["Brokerage CSV", "Watchlist"],
+        horizontal=True, key="p_input_source",
+        help="Brokerage CSV: scan every position in an export. "
+             "Watchlist: type a basket of tickers — no broker account or "
+             "CSV needed (best-option scan only).",
+    )
+    is_watchlist = input_source == "Watchlist"
 
-    with _fmt_col:
-        brokerage = st.selectbox(
-            "Format",
-            ["schwab", "robinhood", "fidelity", "merrill", "stockpile"],
-            index=None,
-            placeholder="Select format…",
-            key="p_brokerage",
-            help="Select your brokerage export format, or 'stockpile' for a "
-                 "manually-entered transaction log.",
+    uploaded = None
+    brokerage = None
+    watchlist_tickers: list[str] = []
+
+    if is_watchlist:
+        _wl_text = st.text_area(
+            "Tickers",
+            key="p_watchlist",
+            placeholder="AMD, NVDA, AAPL  (commas, spaces, or new lines)",
+            help="Separate tickers by comma, space, or new line. Append ! to "
+                 "a symbol to disable index normalization.",
         )
-        if uploaded is not None and st.session_state.get("_port_detect_ran"):
-            _auto = st.session_state.get("_port_auto_detected")
-            if _auto and brokerage == _auto:
-                st.markdown(
-                    badge("AUTO-DETECTED", "positive")
-                    + f"&nbsp;<span style='font-size:0.78rem'>{_auto}</span>",
-                    unsafe_allow_html=True,
-                )
-            elif not _auto and brokerage is None:
-                st.markdown(
-                    badge("FORMAT UNKNOWN", "neutral")
-                    + "&nbsp;<span style='font-size:0.78rem'>select manually</span>",
-                    unsafe_allow_html=True,
-                )
+        watchlist_tickers = _parse_watchlist(_wl_text or "")
+        if watchlist_tickers:
+            st.caption(f"{len(watchlist_tickers)} ticker(s): "
+                       + ", ".join(watchlist_tickers))
+    else:
+        # ── Upload row: file picker (50 %) + format selector (25 %) + spacer ──
+        _up_col, _fmt_col, _ = st.columns([2, 1, 1])
+        with _up_col:
+            uploaded = st.file_uploader("Brokerage CSV export", type=["csv"])
+            st.markdown(
+                "<div style='margin: 0.2rem 0 0 0;'>"
+                + badge("PROCESSED LOCALLY · NEVER UPLOADED", "positive")
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+
+        # ── Auto-detect format on new file upload ────────────────────────────
+        if uploaded is not None:
+            _file_sig = f"{uploaded.name}:{len(uploaded.getvalue())}"
+            if st.session_state.get("_port_file_sig") != _file_sig:
+                _detected = detect_brokerage(uploaded.getvalue())
+                st.session_state["_port_file_sig"] = _file_sig
+                st.session_state["_port_auto_detected"] = _detected
+                st.session_state["_port_detect_ran"] = True
+                if _detected:
+                    st.session_state["p_brokerage"] = _detected
+
+        with _fmt_col:
+            brokerage = st.selectbox(
+                "Format",
+                ["schwab", "robinhood", "fidelity", "merrill", "stockpile"],
+                index=None,
+                placeholder="Select format…",
+                key="p_brokerage",
+                help="Select your brokerage export format, or 'stockpile' for "
+                     "a manually-entered transaction log.",
+            )
+            if uploaded is not None and st.session_state.get("_port_detect_ran"):
+                _auto = st.session_state.get("_port_auto_detected")
+                if _auto and brokerage == _auto:
+                    st.markdown(
+                        badge("AUTO-DETECTED", "positive")
+                        + f"&nbsp;<span style='font-size:0.78rem'>{_auto}</span>",
+                        unsafe_allow_html=True,
+                    )
+                elif not _auto and brokerage is None:
+                    st.markdown(
+                        badge("FORMAT UNKNOWN", "neutral")
+                        + "&nbsp;<span style='font-size:0.78rem'>select manually</span>",
+                        unsafe_allow_html=True,
+                    )
 
     # ── Controls row 1: filter params ────────────────────────────────────────
     pc1, pc2, pc3, pc4, pc5, pc6 = st.columns([1, 1, 1, 1, 2, 1])
@@ -237,35 +351,48 @@ def tab_portfolio() -> None:
                                    key="p_top")
 
     # ── Controls row 2: scan semantics ───────────────────────────────────────
-    sc1, sc2, sc3 = st.columns(3)
-    with sc1:
+    # Watchlist mode is best-option only over a typed basket, so Scan mode
+    # and the position-scope checkboxes (which are about CSV positions) hide.
+    if is_watchlist:
         opt_type_label = st.radio(
             "Option type", ["Calls", "Puts", "Both"],
             horizontal=True, key="p_opt_type",
         )
-    with sc2:
-        scan_mode_label = st.radio(
-            "Scan mode", ["Best option", "Roll"],
-            horizontal=True, key="p_scan_mode",
-            help="Best option: surface the top IV-rich pick with no roll context. "
-                 "Roll: find candidates to roll existing open positions into.",
-        )
-    with sc3:
-        st.caption("Positions to scan")
-        scope_open   = st.checkbox("Open options", value=True,  key="p_scope_open",
-                                   help="Has existing short calls or puts.")
-        scope_stock  = st.checkbox("Stock only",   value=True,  key="p_scope_stock",
-                                   help="Holds shares with no open options.")
-        scope_closed = st.checkbox("Closed",       value=False, key="p_scope_closed",
-                                   help="Previously held, now fully exited.")
+        scan_mode_label = "Best option"
+        scope_open = scope_stock = scope_closed = True
+    else:
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1:
+            opt_type_label = st.radio(
+                "Option type", ["Calls", "Puts", "Both"],
+                horizontal=True, key="p_opt_type",
+            )
+        with sc2:
+            scan_mode_label = st.radio(
+                "Scan mode", ["Best option", "Roll"],
+                horizontal=True, key="p_scan_mode",
+                help="Best option: surface the top IV-rich pick with no roll context. "
+                     "Roll: find candidates to roll existing open positions into.",
+            )
+        with sc3:
+            st.caption("Positions to scan")
+            scope_open   = st.checkbox("Open options", value=True,  key="p_scope_open",
+                                       help="Has existing short calls or puts.")
+            scope_stock  = st.checkbox("Stock only",   value=True,  key="p_scope_stock",
+                                       help="Holds shares with no open options.")
+            scope_closed = st.checkbox("Closed",       value=False, key="p_scope_closed",
+                                       help="Previously held, now fully exited.")
 
     opt_type_key  = {"Calls": "calls", "Puts": "puts", "Both": "both"}[opt_type_label]
     scan_mode_key = {"Roll": "roll", "Best option": "best"}[scan_mode_label]
     _side = {"calls": "call", "puts": "put", "both": "both"}[opt_type_key]
 
-    # Invalidate stored results when the file, format, or scan semantics change.
+    # Invalidate stored results when the source, file, format, watchlist, or
+    # scan semantics change.
     _cache_key = (
+        input_source,
         f"{uploaded.name}:{len(uploaded.getvalue())}" if uploaded else None,
+        tuple(watchlist_tickers),
         brokerage,
         opt_type_key,
         scan_mode_key,
@@ -277,9 +404,9 @@ def tab_portfolio() -> None:
         st.session_state.pop("portfolio_results", None)
         st.session_state["_portfolio_cache_key"] = _cache_key
 
-    # ── Validation (auto-runs when file + format are both set) ───────────────
+    # ── Validation (CSV source only; auto-runs when file + format are set) ────
     scan_ready = False
-    if uploaded is not None and brokerage is not None:
+    if not is_watchlist and uploaded is not None and brokerage is not None:
         with st.container(border=True):
             st.caption(
                 f"**Validation** — {uploaded.name}"
@@ -300,41 +427,51 @@ def tab_portfolio() -> None:
                     "SPLIT, TRANSFER_IN)."
                 )
 
-    if st.button("Scan Portfolio", type="primary",
-                 disabled=(uploaded is None or brokerage is None
-                           or not scan_ready)):
-        from options_scanner.portfolio import get_portfolio
+    _scan_disabled = (not watchlist_tickers if is_watchlist
+                      else (uploaded is None or brokerage is None
+                            or not scan_ready))
+    _scan_label = "Scan Watchlist" if is_watchlist else "Scan Portfolio"
+    if st.button(_scan_label, type="primary", disabled=_scan_disabled):
         _provider = st.session_state.get("data_source", "yahoo")
         _scfg = st.session_state.get("schwab_config")
 
-        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
-            f.write(uploaded.getvalue())
-            tmp_path = f.name
-
-        try:
-            positions = get_portfolio(tmp_path, brokerage, include_closed=True)
-            # Keep positions that match any checked bucket.
-            # Roll mode only applies inside the "Open options" bucket; the other
-            # two buckets always use "best option" logic (handled in the render
-            # loop via the covered/roll_close flags, which are False/None when
-            # the position has no open options).
+        if is_watchlist:
+            # Synthetic positions: no shares, no open options → best-option scan.
             positions = [
-                p for p in positions
-                if (scope_open   and (p["open_calls"] or p["open_puts"]))
-                or (scope_stock  and p["shares"] > 0
-                    and not p["open_calls"] and not p["open_puts"])
-                or (scope_closed and p["shares"] <= 0
-                    and not p["open_calls"] and not p["open_puts"])
+                {"ticker": t, "shares": 0, "open_calls": [], "open_puts": []}
+                for t in watchlist_tickers
             ]
-        except Exception as exc:
-            st.error(f"Could not parse CSV: {exc}")
+            source_name = f"Watchlist ({len(positions)} tickers)"
+        else:
+            from options_scanner.portfolio import get_portfolio
+            with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+                f.write(uploaded.getvalue())
+                tmp_path = f.name
+            try:
+                positions = get_portfolio(tmp_path, brokerage, include_closed=True)
+                # Keep positions that match any checked bucket. Roll mode only
+                # applies inside the "Open options" bucket; the other two buckets
+                # always use "best option" logic (handled in the render loop via
+                # the covered/roll_close flags, which are False/None when the
+                # position has no open options).
+                positions = [
+                    p for p in positions
+                    if (scope_open   and (p["open_calls"] or p["open_puts"]))
+                    or (scope_stock  and p["shares"] > 0
+                        and not p["open_calls"] and not p["open_puts"])
+                    or (scope_closed and p["shares"] <= 0
+                        and not p["open_calls"] and not p["open_puts"])
+                ]
+            except Exception as exc:
+                st.error(f"Could not parse CSV: {exc}")
+                os.unlink(tmp_path)
+                st.stop()
             os.unlink(tmp_path)
-            st.stop()
-
-        os.unlink(tmp_path)
+            source_name = uploaded.name
 
         if not positions:
-            st.warning("No positions found in this CSV.")
+            st.warning("No positions to scan." if is_watchlist
+                       else "No positions found in this CSV.")
             st.stop()
 
         st.success(f"Found {len(positions)} position(s): "
@@ -343,68 +480,13 @@ def tab_portfolio() -> None:
         progress = st.progress(0, text="Scanning…")
         results = []
         for i, pos in enumerate(positions):
-            ticker = pos["ticker"]
             progress.progress((i + 1) / len(positions),
-                              text=f"Scanning {ticker} ({i+1}/{len(positions)})…")
-
-            df, earnings_dates, err = fetch_position(
-                ticker, int(port_min_dte), _provider, _scfg,
-                moomoo_config=st.session_state.get("moomoo_config"),
-                opt_type=opt_type_key,
-                max_dte=int(port_max_dte),
-            )
-
-            # Roll close cost lookup — only in Roll mode, only for open options
-            # on the relevant side(s).
-            roll_close_costs = {}
-            if scan_mode_key == "roll":
-                opts_to_lookup = []
-                if opt_type_key in ("calls", "both"):
-                    opts_to_lookup += [(opt, "calls") for opt in pos["open_calls"]]
-                if opt_type_key in ("puts", "both"):
-                    opts_to_lookup += [(opt, "puts") for opt in pos["open_puts"]]
-
-                _schwab_client = None
-                if _provider == "schwab" and opts_to_lookup:
-                    from stocks_shared.schwab_live import get_client
-                    try:
-                        _schwab_client = get_client(
-                            _scfg["app_key"], _scfg["app_secret"],
-                            _scfg["callback_url"], _scfg["token_file"],
-                        )
-                    except (ValueError, TypeError):
-                        pass
-
-                for opt, side in opts_to_lookup:
-                    m, d, y = opt["expiration"].split("/")
-                    exp_yf = f"{y}-{m}-{d}"
-                    if _provider == "schwab" and _schwab_client is not None:
-                        from stocks_shared.schwab_live import fetch_option_chain_schwab
-                        chain = fetch_option_chain_schwab(_schwab_client, ticker,
-                                                          exp_yf)
-                    else:
-                        from stocks_shared.yahoo import fetch_option_chain
-                        chain = fetch_option_chain(ticker, exp_yf)
-                    if chain is None:
-                        continue
-                    chain_df = chain.calls if side == "calls" else chain.puts
-                    row = chain_df[chain_df["strike"] == float(opt["strike"])]
-                    if not row.empty:
-                        bid  = float(row["bid"].iloc[0] or 0)
-                        ask  = float(row["ask"].iloc[0] or 0)
-                        last = float(row["lastPrice"].iloc[0] or 0)
-                        roll_close_costs[opt["symbol"]] = (
-                            (bid + ask) / 2 if bid > 0 and ask > 0 else last
-                        )
-
-            results.append({
-                "position": pos,
-                "error": err,
-                "df": df,
-                "spot": float(df["spot"].iloc[0]) if not df.empty else None,
-                "earnings_dates": earnings_dates,
-                "roll_close_costs": roll_close_costs,
-            })
+                              text=f"Scanning {pos['ticker']} "
+                                   f"({i+1}/{len(positions)})…")
+            results.append(_scan_one(
+                pos, opt_type_key, scan_mode_key, _provider, _scfg,
+                int(port_min_dte), int(port_max_dte),
+            ))
 
         progress.empty()
         st.session_state["scan_ts"] = datetime.now().astimezone()
@@ -413,7 +495,7 @@ def tab_portfolio() -> None:
         )
         st.session_state["portfolio_results"] = {
             "results": results,
-            "uploaded_name": uploaded.name,
+            "uploaded_name": source_name,
             "opt_type": opt_type_key,
             "scan_mode": scan_mode_key,
         }
@@ -428,6 +510,17 @@ def tab_portfolio() -> None:
     stored_opt_type  = stored.get("opt_type", "calls")
     stored_scan_mode = stored.get("scan_mode", "roll")
     stored_side      = {"calls": "call", "puts": "put", "both": "both"}[stored_opt_type]
+
+    # ── Cross-ticker leaderboard — richest IV+pp across the whole basket ──────
+    if len(results) > 1:
+        section_header(
+            title="Leaderboard",
+            subtitle="Richest IV+pp contracts across every scanned ticker.",
+            eyebrow="TOP CANDIDATES",
+        )
+        render_leaderboard(results, stored_side, int(port_min_oi),
+                           int(port_top), int(port_min_vol),
+                           delta_range=port_delta_range)
 
     for res in results:
         pos    = res["position"]
@@ -573,7 +666,8 @@ def tab_portfolio() -> None:
     from options_scanner.report import render_portfolio_html
     port_html = render_portfolio_html(
         results, uploaded_name, int(port_min_oi), int(port_top),
-        int(port_min_vol),
+        int(port_min_vol), opt_type=stored_opt_type,
+        delta_range=port_delta_range,
     )
     st.download_button(
         "⬇ Download Portfolio Report",

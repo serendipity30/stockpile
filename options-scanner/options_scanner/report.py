@@ -506,17 +506,128 @@ def save_html(
 
 # ── Portfolio report ─────────────────────────────────────────────────────────
 
+def _leaderboard_html(results: list[dict], side: str, min_oi: int,
+                      top_n: int, min_vol: int,
+                      delta_range: tuple[float, float] | None = None) -> str:
+    """Cross-ticker leaderboard table for one side, mirroring the UI.
+
+    "Best per ticker, then fill": every ticker's #1 pick is guaranteed a
+    slot, remaining slots fill with the next-richest leftovers, total rows
+    = 2× the number of represented tickers, all sorted by IV+pp. Each
+    ticker's #1 row is shaded. Returns "" when nothing qualifies.
+    """
+    import pandas as pd
+
+    per_ticker = []
+    for res in results:
+        if res["error"] or res["df"] is None or res["df"].empty:
+            continue
+        df = res["df"]
+        sub = df[(df["type"] == side)
+                 & (df["open_interest"] >= min_oi)
+                 & (df["volume"] >= min_vol)]
+        if delta_range is not None:
+            lo, hi = delta_range
+            sub = sub[sub["delta"].abs().between(lo, hi)]
+        if sub.empty:
+            continue
+        sub = (sub.sort_values(["iv_excess", "open_interest"],
+                               ascending=[False, False]).head(top_n).copy())
+        sub["ticker"] = res["position"]["ticker"]
+        sub["_is_ticker_top"] = [True] + [False] * (len(sub) - 1)
+        per_ticker.append(sub.reset_index(drop=True))
+    if not per_ticker:
+        return ""
+
+    target = 2 * len(per_ticker)
+    guaranteed = pd.concat([t.iloc[[0]] for t in per_ticker], ignore_index=True)
+    leftovers = [t.iloc[1:] for t in per_ticker if len(t) > 1]
+    if leftovers:
+        pool = (pd.concat(leftovers, ignore_index=True)
+                .sort_values(["iv_excess", "open_interest"],
+                             ascending=[False, False]))
+        board = pd.concat([guaranteed, pool.head(max(0, target - len(guaranteed)))],
+                          ignore_index=True)
+    else:
+        board = guaranteed
+    board = (board.sort_values(["iv_excess", "open_interest"],
+                               ascending=[False, False]).head(target))
+
+    rows = []
+    for _, r in board.iterrows():
+        earn_tag = (f' <span class="tag-earn">{int(r["earnings_count"])}E</span>'
+                    if r.get("earnings_count", 0) > 0 else "")
+        iv_ex = r["iv_excess"] * 100
+        tr_attr = ' style="background-color:rgba(53,194,193,0.16)"' \
+            if r.get("_is_ticker_top") else ""
+        rows.append(
+            f'<tr{tr_attr}><td><a href="#{r["ticker"]}">{r["ticker"]}</a></td>'
+            f'<td data-val="{r["strike"]:.2f}">${r["strike"]:.0f}</td>'
+            f'<td data-val="{r["expiration"]}">{_fmt_exp(r["expiration"])}{earn_tag}</td>'
+            f'<td data-val="{r["dte"]}">{int(r["dte"])}</td>'
+            f'<td data-val="{r["bid"]:.4f}">${r["bid"]:.2f}</td>'
+            f'<td data-val="{r["ask"]:.4f}">${r["ask"]:.2f}</td>'
+            f'<td data-val="{r["mid"]:.4f}">${r["mid"]:.2f}</td>'
+            + (f'<td data-val="{r["last"]:.4f}">${r["last"]:.2f}</td>'
+               if r.get("last", 0) > 0 else '<td data-val="0">&mdash;</td>')
+            + f'<td data-val="{iv_ex:.4f}" class="{_iv_class(iv_ex, False)}">{iv_ex:+.1f}</td>'
+            f'<td data-val="{r["delta"]:.4f}">{r["delta"]:.2f}</td>'
+            f'<td data-val="{r["ann_yield_pct"]:.4f}">{r["ann_yield_pct"]:.1f}</td>'
+            f'<td data-val="{r["open_interest"]}">{r["open_interest"]:,}</td>'
+            f'<td data-val="{r["volume"]}">{int(r["volume"]):,}</td></tr>'
+        )
+
+    tid = f"tbl-lead-{side}"
+    heads = [("Ticker", False), ("Strike", True), ("Expiration", False),
+             ("DTE", True), ("Bid", True), ("Ask", True), ("Mid", True),
+             ("Last", True), ("IV+pp", True), ("Delta", True),
+             ("Ann%", True), ("OI", True), ("Vol", True)]
+    ths = "".join(
+        f'<th onclick="sortTable(\'{tid}\',{i},{"true" if num else "false"})">'
+        f"{label}</th>"
+        for i, (label, num) in enumerate(heads)
+    )
+    label = {"call": "Calls", "put": "Puts"}[side]
+    return (
+        f'<h3 style="margin:.6em 0 .3em">{label}</h3>'
+        f'<div style="overflow:auto">'
+        f'<table id="{tid}" data-sort-col="-1">'
+        f"<thead><tr>{ths}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+        f"</div>"
+    )
+
+
 def render_portfolio_html(
     results: list[dict],
     csv_name: str,
     min_oi: int,
     top_n: int,
     min_vol: int = 0,
+    opt_type: str = "calls",
+    delta_range: tuple[float, float] | None = None,
 ) -> str:
     """Return a combined portfolio HTML report as a string."""
     today = date.today()
     scan_date = today.strftime("%B %d, %Y")
     lt_date = (today + timedelta(days=366)).strftime("%b %d '%y")
+
+    # Cross-ticker leaderboard section (only meaningful with >1 ticker).
+    leaderboard_html = ""
+    if len(results) > 1:
+        sides = (["call", "put"] if opt_type == "both"
+                 else ["call" if opt_type == "calls" else "put"])
+        boards = "".join(
+            _leaderboard_html(results, s, min_oi, top_n, min_vol, delta_range)
+            for s in sides
+        )
+        if boards:
+            leaderboard_html = (
+                '<div class="card">'
+                '<h2 style="margin-top:0">Leaderboard '
+                '<span style="font-weight:400;font-size:.7em;color:#666">'
+                '— richest IV+pp across all tickers</span></h2>'
+                f"{boards}</div>"
+            )
 
     # Summary table rows
     summary_rows = ""
@@ -654,6 +765,7 @@ def render_portfolio_html(
     <tbody>{summary_rows}</tbody>
   </table>
 </div>
+{leaderboard_html}
 {sections_html}
 <div class="card">
   <h2 style="margin-top:0">How to read this report</h2>
@@ -671,8 +783,11 @@ def save_portfolio_html(
     min_oi: int,
     top_n: int,
     min_vol: int = 0,
+    opt_type: str = "calls",
+    delta_range: tuple[float, float] | None = None,
 ) -> None:
-    html = render_portfolio_html(results, csv_name, min_oi, top_n, min_vol)
+    html = render_portfolio_html(results, csv_name, min_oi, top_n, min_vol,
+                                 opt_type=opt_type, delta_range=delta_range)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
     log.info("Portfolio HTML report saved: %s", output_path)
