@@ -233,8 +233,17 @@ function renderDashboard() {
 
     // Events
     srcSel.addEventListener('change', () => {
+      const prevSource = ps.source;
       ps.source = srcSel.value;
-      ps.symbol = (CATALOG[ps.source] || [])[0] || '';
+      // Keep the current symbol when switching between equity sources
+      // (Yahoo <-> Schwab share tickers). Only fall back to the catalog
+      // default across the crypto/stock boundary, where symbols differ,
+      // or when no symbol is set yet.
+      const crossesCrypto =
+        (prevSource === 'hyperliquid') !== (ps.source === 'hyperliquid');
+      if (crossesCrypto || !ps.symbol) {
+        ps.symbol = (CATALOG[ps.source] || [])[0] || '';
+      }
       ps.customized = true;
       saveState(); renderDashboard(); initAll();
     });
