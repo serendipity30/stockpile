@@ -81,6 +81,27 @@ A browser tab opens at http://localhost:8501. Type a ticker on the
 For setup details, brokerage CSV configuration, and tool-specific
 commands, see each tool's README linked above.
 
+## Updating
+
+To pull in the latest changes:
+
+**If you cloned with git:**
+
+```bash
+cd stockpile
+git pull
+uv sync          # picks up any new/changed dependencies
+```
+
+**If you downloaded the ZIP from GitHub:** download it again (green
+**Code** button → **Download ZIP**), unzip it, and copy the contents
+over your existing `stockpile` folder, replacing files when prompted.
+Then run `uv sync` to pick up any dependency changes.
+
+Either way your local data is preserved: `config.toml`, brokerage CSVs
+in `input/`, and your own saved watchlists are gitignored, so updating
+never overwrites them. (The bundled starter watchlists may update.)
+
 ## Requirements
 
 - Python 3.12+

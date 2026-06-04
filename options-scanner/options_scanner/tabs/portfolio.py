@@ -34,6 +34,7 @@ from options_scanner.display.spot_meta import (
 from options_scanner.fetch import fetch_position
 from options_scanner.portfolio import detect_brokerage
 from options_scanner.ui_theme import badge, metric_card, section_header
+from options_scanner import watchlists
 
 
 @st.cache_data(show_spinner=False)
@@ -270,14 +271,97 @@ def tab_portfolio() -> None:
     watchlist_tickers: list[str] = []
 
     if is_watchlist:
-        _wl_text = st.text_area(
-            "Tickers",
-            key="p_watchlist",
-            placeholder="AMD, NVDA, AAPL  (commas, spaces, or new lines)",
-            help="Separate tickers by comma, space, or new line. Append ! to "
-                 "a symbol to disable index normalization.",
-        )
-        watchlist_tickers = _parse_watchlist(_wl_text or "")
+        # Saved watchlists row: load one (refills tickers + its filters), or
+        # name the current basket and Save/Delete it. The selectbox on_change
+        # runs before the rerun, so its session-state writes reach the widgets
+        # on the next render. Save/Delete read the current tickers + filters
+        # from session state (the widgets below persist across reruns).
+        # Show a save/delete confirmation from the previous run (set just
+        # before its st.rerun(), so the message survives the rerun), then clear.
+        _flash = st.session_state.pop("_wl_flash", None)
+        if _flash:
+            st.success(_flash)
+
+        _saved = watchlists.load()
+        _names = {e["name"].lower() for e in _saved}
+        _wl_placeholder = "— saved watchlists —"
+
+        def _apply_watchlist() -> None:
+            entry = next((e for e in _saved
+                          if e["name"] == st.session_state.get("p_wl_saved")), None)
+            if entry is None:
+                return
+            _step = 0.05
+            _dmin = round(round(float(entry.get("delta_min", 0.10)) / _step) * _step, 10)
+            _dmax = round(round(float(entry.get("delta_max", 0.70)) / _step) * _step, 10)
+            st.session_state["p_watchlist"] = ", ".join(entry["tickers"])
+            # Fill the name field too, so Save (re-save) and Delete light up
+            # for the loaded watchlist.
+            st.session_state["p_wl_name"] = entry["name"]
+            st.session_state["p_min_dte"]  = max(1, int(entry.get("min_dte", 30)))
+            st.session_state["p_max_dte"]  = max(1, int(entry.get("max_dte", 90)))
+            st.session_state["p_min_oi"]   = max(0, int(entry.get("min_oi", 25)))
+            st.session_state["p_min_vol"]  = max(0, int(entry.get("min_vol", 1)))
+            st.session_state["p_delta"]    = (_dmin, _dmax)
+            st.session_state["p_top"]      = max(1, int(entry.get("top_n", 5)))
+            st.session_state["p_opt_type"] = entry.get("option_type", "Calls")
+            # Reset to placeholder (allowed inside on_change) so the same
+            # pick can be re-applied later after manual edits.
+            st.session_state["p_wl_saved"] = _wl_placeholder
+
+        _tk_col, _mid_col, _btn_col = st.columns([4, 2, 1])
+        with _tk_col:
+            _wl_text = st.text_area(
+                "Tickers", key="p_watchlist", height=160,
+                placeholder="AMD, NVDA, AAPL  (commas, spaces, or new lines)",
+                help="Separate tickers by comma, space, or new line. Append ! "
+                     "to a symbol to disable index normalization.",
+            )
+            st.caption("Separate with commas, spaces, or new lines.")
+            watchlist_tickers = _parse_watchlist(_wl_text or "")
+        with _mid_col:
+            st.selectbox(
+                "Saved watchlists",
+                [_wl_placeholder] + [e["name"] for e in _saved],
+                index=0, key="p_wl_saved", on_change=_apply_watchlist,
+                help="Load a saved basket and the filters it was saved with.",
+            )
+            _wl_name = st.text_input(
+                "Save as", key="p_wl_name",
+                placeholder="e.g. Mag7  (.json ext will be added)",
+                help="Name the current basket to reuse it later — the .json "
+                     "extension is added automatically. Re-saving a name "
+                     "overwrites it.",
+            )
+        _name = _wl_name.strip()
+        with _btn_col:
+            st.markdown("<div style='height:1.72rem'></div>", unsafe_allow_html=True)
+            if st.button("💾 Save", use_container_width=True,
+                         disabled=not (watchlist_tickers and _name)):
+                _d = st.session_state.get("p_delta", (0.10, 0.70))
+                _was_update = _name.lower() in _names
+                watchlists.save({
+                    "name": _name,
+                    "tickers": watchlist_tickers,
+                    "option_type": st.session_state.get("p_opt_type", "Calls"),
+                    "min_dte": int(st.session_state.get("p_min_dte", 30)),
+                    "max_dte": int(st.session_state.get("p_max_dte", 90)),
+                    "min_oi": int(st.session_state.get("p_min_oi", 25)),
+                    "min_vol": int(st.session_state.get("p_min_vol", 1)),
+                    "delta_min": float(_d[0]),
+                    "delta_max": float(_d[1]),
+                    "top_n": int(st.session_state.get("p_top", 5)),
+                })
+                st.session_state["_wl_flash"] = (
+                    f"{'Updated' if _was_update else 'Saved'} watchlist "
+                    f"“{_name}” ({len(watchlist_tickers)} tickers).")
+                st.rerun()
+            if st.button("🗑 Delete", use_container_width=True,
+                         disabled=_name.lower() not in _names):
+                watchlists.delete(_name)
+                st.session_state["_wl_flash"] = f"Deleted watchlist “{_name}”."
+                st.rerun()
+
         if watchlist_tickers:
             st.caption(f"{len(watchlist_tickers)} ticker(s): "
                        + ", ".join(watchlist_tickers))

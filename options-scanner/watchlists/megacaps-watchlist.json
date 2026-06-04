@@ -1,0 +1,21 @@
+{
+  "name": "Mega Caps",
+  "tickers": [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "AVGO",
+    "TSLA"
+  ],
+  "option_type": "Calls",
+  "min_dte": 30,
+  "max_dte": 90,
+  "min_oi": 25,
+  "min_vol": 1,
+  "delta_min": 0.1,
+  "delta_max": 0.7,
+  "top_n": 5
+}

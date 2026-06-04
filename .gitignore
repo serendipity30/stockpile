@@ -11,6 +11,13 @@ build/
 config.toml
 *.json
 !config.toml.example
+# Watchlists: one JSON per list. Personal lists stay local; only the
+# shipped starter baskets are tracked.
+options-scanner/watchlists/*.json
+!options-scanner/watchlists/megacaps-watchlist.json
+!options-scanner/watchlists/semiconductors.json
+!options-scanner/watchlists/high-iv.json
+!options-scanner/watchlists/index-etfs.json
 .env
 
 # Brokerage CSV exports
