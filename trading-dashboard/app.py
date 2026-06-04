@@ -66,15 +66,16 @@ def ohlcv():
     if cached is not None: return jsonify({"ok":True,"data":cached,"cached":True})
     try:
         candles = fetch_ohlcv(source,symbol,interval,limit); _put(ckey,candles); return jsonify({"ok":True,"data":candles,"cached":False})
-    except ValueError as e:
-        # Intentional, user-facing reasons (Schwab not configured, no data
-        # for symbol, etc.) — surface the message so the pane tells the user
-        # what to fix instead of a generic "could not fetch".
-        app.logger.warning("ohlcv fetch failed (source=%s symbol=%s interval=%s): %s", source, symbol, interval, e)
-        return jsonify({"ok":False,"error":str(e).replace("\n"," ")}), 400
     except Exception:
+        # Log the real reason server-side; return a curated message that does
+        # NOT echo the exception text, so internal details (file paths, SDK
+        # errors) never reach the client — CWE-209 / "info exposure". The
+        # message is built only from request args + a fixed hint.
         app.logger.exception("ohlcv fetch failed (source=%s symbol=%s interval=%s)", source, symbol, interval)
-        return jsonify({"ok":False,"error":f"Could not fetch data for '{symbol}' from '{source}'"}), 400
+        msg = f"Could not fetch data for '{symbol}' from '{source}'."
+        if source == "schwab":
+            msg += " If Schwab isn't set up, see options-scanner/SCHWAB_DATA_SOURCE.md."
+        return jsonify({"ok":False,"error":msg}), 400
 
 @app.route('/api/price')
 def price():
