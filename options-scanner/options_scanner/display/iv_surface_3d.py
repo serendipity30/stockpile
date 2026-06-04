@@ -71,9 +71,8 @@ def render_iv_surface_3d(frame: pd.DataFrame, spot: float, ticker: str,
     )
 
     # Diverging IV+pp color scale, matching the 2D chart (sell: green rich /
-    # red cheap; buy flips). The saturation bound is computed per visible set
-    # inside _chain_traces — basing it on the full frame let a few wild-winged
-    # contracts wash the near-ATM band dots out to mid-gray.
+    # red cheap; buy flips). Saturation (cmax) is computed once below from the
+    # in-fit contracts, so it's identical across both views.
     if buy:
         ivpp_scale = [[0.0, "#22c55e"], [0.5, "#cbd5e1"], [1.0, "#ef4444"]]
     else:
@@ -116,6 +115,16 @@ def render_iv_surface_3d(frame: pd.DataFrame, spot: float, ticker: str,
     zr_band = (_zrange(filtered["IV%"], min_span=_full_span * 0.5)
                if has_delta else zr_full)
 
+    # Color saturation from the well-behaved in-fit contracts — computed once
+    # and shared by the surface and both views, so the central region reads
+    # identically in the band and full-chain views. The deep-wing extrapolation
+    # (|IV+pp| can hit ±60 on garbage ITM/OTM IV) no longer drives the scale.
+    if "in_fit" in frame.columns and bool(frame["in_fit"].any()):
+        _pp = frame.loc[frame["in_fit"], "IV+pp"].abs()
+    else:
+        _pp = frame["IV+pp"].abs()
+    cmax = max(float(np.nanpercentile(_pp, 90)) if len(_pp) else 1.0, 1.0)
+
     hover = (
         "Strike $%{x:,.2~f}<br>DTE %{y}d<br>%{customdata[1]}"
         "<br>IV %{z:.1f}%  ·  IV+pp %{customdata[0]:+.1f}"
@@ -128,41 +137,45 @@ def render_iv_surface_3d(frame: pd.DataFrame, spot: float, ticker: str,
     def _chain_traces(sub: pd.DataFrame, visible: bool):
         """Build (mesh? + dots) traces for one frame; returns (list, mesh_ok)."""
         traces = []
-        # Per-view IV+pp color saturation (≈p90 of |IV+pp| in this view),
-        # shared by the surface tint and the dots so they read on one scale.
-        # Full-frame scaling washed the modest near-ATM band dots out to gray,
-        # since deep-wing contracts carry far larger IV+pp.
-        _pp_abs = sub["IV+pp"].abs()
-        cmax = float(np.nanpercentile(_pp_abs, 90)) if len(_pp_abs) else 1.0
-        cmax = max(cmax, 1.0)
+        # `cmax` (the IV+pp color saturation) is computed once in the enclosing
+        # scope from the in-fit contracts, so the scale is identical in both
+        # views and on the surface.
         n_exp = sub["expiration"].nunique()
         n_strk = sub["strike"].nunique()
         mesh_ok = n_exp >= 2 and n_strk >= 3 and "FittedIV%" in sub.columns
         if mesh_ok:
-            mesh_src = sub.dropna(subset=["FittedIV%"])
-            if fit_range is not None:
-                lo, hi = fit_range
-                mesh_src = mesh_src[mesh_src["strike"].between(lo, hi)]
-            grid = mesh_src.pivot_table(index="dte", columns="strike",
-                                        values="FittedIV%", aggfunc="mean")
-            # Parallel IV+pp grid (actual − fitted) on the same axes — used to
-            # tint the plane: green where actual IV sits above it (rich), red
-            # where below (cheap). Interpolated along strike (like the height
-            # grid) so the color is a smooth gradient, not a sparse patchwork.
-            cgrid = (mesh_src.pivot_table(index="dte", columns="strike",
-                                          values="IV+pp", aggfunc="mean")
-                     .reindex(index=grid.index, columns=grid.columns))
+            # Fitted surface from the in-fit anchors of the full frame — so it's
+            # identical in the band and full-chain views and its gap-fill only
+            # ever sees trustworthy contracts (no wing smear). Height = fitted
+            # (expected) IV; color = IV+pp deviation (green rich, red cheap).
+            # Out-of-fit dots simply float above/below it.
+            fit_df = (frame[frame["in_fit"]] if "in_fit" in frame.columns
+                      else frame).dropna(subset=["FittedIV%"])
+            if fit_df.empty:
+                fit_df = sub.dropna(subset=["FittedIV%"])
+
+            def _grid(df, value):
+                return df.pivot_table(index="dte", columns="strike",
+                                      values=value, aggfunc="mean")
+
+            def _fill(g):
+                g = g.interpolate(axis=1).interpolate(axis=0)
+                return (g.ffill(axis=1).bfill(axis=1)
+                         .ffill(axis=0).bfill(axis=0))
+
+            grid = _grid(fit_df, "FittedIV%")
             if grid.shape[0] >= 2 and grid.shape[1] >= 3:
-                grid = grid.interpolate(axis=1, limit_area="inside")
-                cgrid = cgrid.interpolate(axis=1, limit_area="inside")
+                grid = _fill(grid)
+                cgrid = _fill(
+                    _grid(fit_df, "IV+pp").reindex(index=grid.index,
+                                                   columns=grid.columns)
+                ).clip(-cmax, cmax)
                 traces.append(go.Surface(
-                    x=grid.columns.values, y=grid.index.values, z=grid.values,
-                    # Height = fitted (expected) IV; color = IV+pp deviation.
+                    x=grid.columns.values.astype(float),
+                    y=grid.index.values, z=grid.values,
                     surfacecolor=cgrid.values, colorscale=ivpp_scale,
                     cmin=-cmax, cmax=cmax, opacity=0.9, showscale=False,
                     hoverinfo="skip", name="Fitted surface", visible=visible,
-                    # Lighting gives the plane its shape now that color encodes
-                    # deviation rather than height.
                     lighting=dict(ambient=0.6, diffuse=0.8, specular=0.12,
                                   roughness=0.6, fresnel=0.1),
                     lightposition=dict(x=10000, y=10000, z=8000),
@@ -170,38 +183,48 @@ def render_iv_surface_3d(frame: pd.DataFrame, spot: float, ticker: str,
             else:
                 mesh_ok = False
 
-        def _col(name):
-            return (sub[name] if name in sub.columns
-                    else pd.Series([float("nan")] * len(sub), index=sub.index))
+        # Dots colored by IV+pp on the shared scale; Top-N picks get a bigger
+        # marker (mirrors the 2D chart's outlined pick dots).
+        def _dots(d: pd.DataFrame, colorscale, colorbar: bool):
+            if d.empty:
+                return None
 
-        exp_str = sub["expiration"].apply(
-            lambda d: datetime.strptime(d, "%Y-%m-%d").strftime("%b %d '%y"))
-        last_str = _col("last").apply(
-            lambda v: f"${v:.2f}" if pd.notna(v) and v > 0 else "—")
-        # Top-N picks get a bigger, ringed marker so they stand out from the
-        # rest of the chain (mirrors the 2D chart's outlined pick dots).
-        is_top = (sub["is_top"].to_numpy() if "is_top" in sub.columns
-                  else np.zeros(len(sub), dtype=bool))
-        sizes = np.where(is_top, 9, 4)
+            def col(name):
+                return (d[name] if name in d.columns
+                        else pd.Series([float("nan")] * len(d), index=d.index))
 
-        traces.append(go.Scatter3d(
-            x=sub["strike"], y=sub["dte"], z=sub["IV%"], mode="markers",
-            marker=dict(
-                size=sizes, color=sub["IV+pp"], colorscale=ivpp_scale,
-                cmin=-cmax, cmax=cmax,
-                colorbar=dict(
+            exp_s = d["expiration"].apply(
+                lambda x: datetime.strptime(x, "%Y-%m-%d").strftime("%b %d '%y"))
+            last_s = col("last").apply(
+                lambda v: f"${v:.2f}" if pd.notna(v) and v > 0 else "—")
+            tops = (d["is_top"].to_numpy() if "is_top" in d.columns
+                    else np.zeros(len(d), dtype=bool))
+            mk = dict(
+                size=np.where(tops, 9, 4), color=d["IV+pp"],
+                colorscale=colorscale, cmin=-cmax, cmax=cmax,
+                line=dict(width=0.5, color="#0f172a"),
+            )
+            if colorbar:
+                mk["colorbar"] = dict(
                     title=dict(text="IV+pp", font=dict(color=_AXIS_FONT)),
                     tickfont=dict(color=_AXIS_FONT),
                     thickness=12, len=0.6, outlinecolor=_GRID,
-                ),
-                line=dict(width=0.5, color="#0f172a"),
-            ),
-            customdata=np.stack([
-                sub["IV+pp"], exp_str, _col("delta"), _col("bid"), _col("ask"),
-                _col("mid"), last_str, _col("open_interest"), _col("volume"),
-            ], axis=-1),
-            hovertemplate=hover, name="Contracts", visible=visible,
-        ))
+                )
+            return go.Scatter3d(
+                x=d["strike"], y=d["dte"], z=d["IV%"], mode="markers", marker=mk,
+                customdata=np.stack([
+                    d["IV+pp"], exp_s, col("delta"), col("bid"), col("ask"),
+                    col("mid"), last_s, col("open_interest"), col("volume"),
+                ], axis=-1),
+                hovertemplate=hover, name="Contracts", visible=visible,
+            )
+
+        _t = _dots(sub, ivpp_scale, colorbar=True)
+        if _t is not None:
+            traces.append(_t)
+
+        is_top = (sub["is_top"].to_numpy() if "is_top" in sub.columns
+                  else np.zeros(len(sub), dtype=bool))
 
         # Rank number floating just above each top pick's dot. Screen-space
         # "top center" keeps the label above the dot through any rotation.
