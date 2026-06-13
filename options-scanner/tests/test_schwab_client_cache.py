@@ -53,3 +53,19 @@ def test_newer_token_file_rebuilds_client(tmp_path, monkeypatch):
 
     assert schwab_live.get_client("ak", "as", "cb", str(token)) == "client-2"
     assert calls["n"] == 2   # rebuilt from the fresh token, no restart needed
+
+
+def test_token_mtime_tracks_file_changes(tmp_path):
+    """token_mtime() is the signal the UI uses to drop cached fetches after
+    a re-auth — None when missing, and it changes when the file is rewritten."""
+    token = tmp_path / "schwab-token.json"
+    assert schwab_live.token_mtime(str(token)) is None
+    assert schwab_live.token_mtime("") is None
+
+    token.write_text("{}")
+    m1 = schwab_live.token_mtime(str(token))
+    assert m1 is not None
+
+    bump = token.stat().st_mtime + 100
+    os.utime(token, (bump, bump))
+    assert schwab_live.token_mtime(str(token)) != m1

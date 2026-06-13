@@ -74,6 +74,17 @@ def _token_mtime(token_path: Path) -> float | None:
         return None
 
 
+def token_mtime(token_file: str) -> float | None:
+    """Public mtime (epoch seconds) of the token file, or None if missing.
+
+    Lets a long-running UI detect re-auth — a freshly minted token
+    rewrites the file — so it can drop cached fetches without a restart.
+    """
+    if not token_file:
+        return None
+    return _token_mtime(Path(token_file).expanduser())
+
+
 def get_client(app_key: str, app_secret: str, callback_url: str,
                token_file: str):
     """Return authenticated schwab-py client; cached per (app_key, token_file).

@@ -211,6 +211,25 @@ st.session_state["data_source"] = data_source
 st.session_state["schwab_config"] = _cfg_schwab if data_source == "schwab" else None
 st.session_state["moomoo_config"] = _cfg_moomoo if data_source == "moomoo" else None
 
+# Pick up a re-authenticated Schwab token without a server restart. A fresh
+# token (re-auth button or schwab_auth.py) rewrites the token file; the
+# client cache already rebuilds on the new mtime, but the @st.cache_data
+# chain/spot fetches would keep serving the failure they cached under
+# identical args until their TTL — which looked like "must restart the
+# server". Detect the mtime change here and drop those caches so the next
+# scan uses the new token.
+if data_source == "schwab" and _cfg_schwab:
+    from stocks_shared.schwab_live import token_mtime as _schwab_token_mtime
+    _cur_tok_mtime = _schwab_token_mtime(_cfg_schwab.get("token_file", ""))
+    if ("_schwab_token_mtime" in st.session_state
+            and st.session_state["_schwab_token_mtime"] != _cur_tok_mtime):
+        from options_scanner.fetch import fetch_and_enrich, fetch_position
+        from options_scanner.display.spot_meta import fetch_spot_meta
+        fetch_and_enrich.clear()
+        fetch_position.clear()
+        fetch_spot_meta.clear()
+    st.session_state["_schwab_token_mtime"] = _cur_tok_mtime
+
 
 # ── Page header chips ────────────────────────────────────────────────────
 # Sidebar: an "About" panel — the legacy theme picker is gone (we now ship
