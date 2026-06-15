@@ -95,6 +95,14 @@ def _parse_rows_to_transactions(rows):
             "",
         ])
 
+    # Schwab CSVs are newest-first and carry only a date (no intraday time),
+    # so same-day trades can only be ordered by their position in the file.
+    # Reverse to oldest-first before the *stable* date sort below, so that a
+    # same-day round trip (e.g. buy then sell) is replayed in the order it
+    # happened rather than the order Schwab printed it. Without this, the buy
+    # that opened the position lands after the sell that closed it and the share
+    # count momentarily goes negative.
+    transactions.reverse()
     transactions.sort(key=lambda r: (r[0][6:], r[0][:2], r[0][3:5]))
     return transactions
 
