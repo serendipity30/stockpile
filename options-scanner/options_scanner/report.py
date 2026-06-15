@@ -372,9 +372,8 @@ def render_html(
 
     earn_html = ""
     if earnings_dates:
-        earn_strs = [d.strftime("%b %d") for d in earnings_dates[:4]]
-        earn_html = (f'<span class="tag-earn">&#9656; Earnings: '
-                     f'{", ".join(earn_strs)}</span>')
+        earn_html = (f'<span class="tag-earn">&#9656; Next earnings: '
+                     f'{earnings_dates[0].strftime("%b %d")}</span>')
 
     action_cls = "tag-buy" if buy else "tag-sell"
     type_labels = {"call": "Calls", "put": "Puts"}
@@ -686,8 +685,8 @@ def render_portfolio_html(
 
             earn_str = ""
             if earnings_dates:
-                earn_str = (f' &nbsp;|&nbsp; <span class="tag-earn">Earnings: '
-                            f'{", ".join(d.strftime("%b %d") for d in earnings_dates[:4])}</span>')
+                earn_str = (f' &nbsp;|&nbsp; <span class="tag-earn">Next earnings: '
+                            f'{earnings_dates[0].strftime("%b %d")}</span>')
 
             roll_close = None
             if pos["open_calls"]:

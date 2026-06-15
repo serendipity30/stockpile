@@ -50,6 +50,9 @@ output/
 cache/
 options-scanner/cache/
 
+# Assisted put-selling trade log (personal trade data)
+options-scanner/trades/
+
 # Images
 *.png
 *.jpg

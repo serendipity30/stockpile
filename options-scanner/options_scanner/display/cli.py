@@ -32,8 +32,7 @@ def print_results(
     print(f"  {ticker}   spot: ${spot:.2f}   action: {action}")
     print(f"  LT close if opened today: {lt_date}")
     if earnings_dates:
-        earn_strs = [d.strftime("%b %d") for d in earnings_dates[:4]]
-        print(f"  Upcoming earnings: {', '.join(earn_strs)}")
+        print(f"  Next earnings: {earnings_dates[0].strftime('%b %d')}")
     print(f"{'-' * 68}")
 
     df = df[(df["open_interest"] >= min_oi) & (df["volume"] >= min_vol)].copy()

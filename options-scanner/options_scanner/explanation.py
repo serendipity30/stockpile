@@ -51,15 +51,15 @@ def generate_explanation(
             f"OI={r['open_interest']}"
         )
         if "earnings_count" in r and r["earnings_count"] > 0:
-            line += f" earn={int(r['earnings_count'])}"
+            line += " earnings_before_exp=yes"
         if roll_close_cost is not None:
             line += f" net_credit=${r['mid'] - roll_close_cost:+.2f}"
         rows_lines.append(line)
 
     earn_text = (
-        f"Upcoming earnings: {', '.join(d.strftime('%b %d') for d in earnings_dates[:4])}"
+        f"Next earnings: {earnings_dates[0].strftime('%b %d')}"
         if earnings_dates
-        else "WARNING: No earnings dates returned by data source -- verify manually before trading."
+        else "WARNING: No earnings date returned by data source -- verify manually before trading."
     )
 
     roll_context = (

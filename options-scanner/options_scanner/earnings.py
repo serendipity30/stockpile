@@ -10,28 +10,45 @@ from stocks_shared.yahoo import normalize_ticker
 log = logging.getLogger(__name__)
 
 
+def _nearest_future(dates) -> list:
+    """Return [nearest upcoming date] from an iterable, or [] if none.
+
+    We keep only the next event: data sources return several future
+    quarters, but only the nearest is company-confirmed — the rest are
+    estimated from the historical cadence, so treating them as real
+    conveys false precision.
+    """
+    today = date.today()
+    future = []
+    for d in dates:
+        try:
+            d2 = d.date() if hasattr(d, "date") else d
+            if d2 >= today:
+                future.append(d2)
+        except Exception:
+            pass
+    return [min(future)] if future else []
+
+
 def fetch_earnings_dates(ticker: str) -> list:
-    """Return sorted list of upcoming earnings dates (up to 8 quarters)."""
+    """Return the next upcoming earnings date as a 0- or 1-element list.
+
+    Deliberately just the *nearest* event (see `_nearest_future`) — the
+    whole pipeline treats earnings as a single upcoming event, never a
+    count of how many fall before an expiration.
+    """
     try:
         import yfinance as yf
         ticker = normalize_ticker(ticker)
         t = yf.Ticker(ticker)
-        today = date.today()
 
         # Approach 1: get_earnings_dates() — most reliable in recent yfinance
         try:
             ed = t.get_earnings_dates(limit=8)
             if ed is not None and not ed.empty:
-                future = []
-                for idx in ed.index:
-                    try:
-                        d = idx.date() if hasattr(idx, "date") else idx
-                        if d >= today:
-                            future.append(d)
-                    except Exception:
-                        pass
-                if future:
-                    return sorted(future)
+                out = _nearest_future(ed.index)
+                if out:
+                    return out
         except Exception:
             pass
 
@@ -39,35 +56,17 @@ def fetch_earnings_dates(ticker: str) -> list:
         try:
             cal = t.calendar
             if cal is not None:
-                # Newer yfinance: cal is a dict
+                raw = None
                 if isinstance(cal, dict):
                     raw = cal.get("Earnings Date")
-                    if raw is not None:
-                        dates = list(raw) if hasattr(raw, "__iter__") and not isinstance(raw, str) else [raw]
-                        result = []
-                        for d in dates:
-                            try:
-                                d2 = d.date() if hasattr(d, "date") else d
-                                if d2 >= today:
-                                    result.append(d2)
-                            except Exception:
-                                pass
-                        if result:
-                            return sorted(result)
-                # Older yfinance: cal is a DataFrame
                 elif hasattr(cal, "index") and "Earnings Date" in cal.index:
                     raw = cal.loc["Earnings Date"]
-                    dates = list(raw) if hasattr(raw, "__iter__") and not isinstance(raw, str) else [raw]
-                    result = []
-                    for d in dates:
-                        try:
-                            d2 = d.date() if hasattr(d, "date") else d
-                            if d2 >= today:
-                                result.append(d2)
-                        except Exception:
-                            pass
-                    if result:
-                        return sorted(result)
+                if raw is not None:
+                    dates = (list(raw) if hasattr(raw, "__iter__")
+                             and not isinstance(raw, str) else [raw])
+                    out = _nearest_future(dates)
+                    if out:
+                        return out
         except Exception:
             pass
 
@@ -75,16 +74,9 @@ def fetch_earnings_dates(ticker: str) -> list:
         try:
             ed = t.earnings_dates
             if ed is not None and not ed.empty:
-                future = []
-                for idx in ed.index:
-                    try:
-                        d = idx.date() if hasattr(idx, "date") else idx
-                        if d >= today:
-                            future.append(d)
-                    except Exception:
-                        pass
-                if future:
-                    return sorted(future)[:8]
+                out = _nearest_future(ed.index)
+                if out:
+                    return out
         except Exception:
             pass
 
@@ -95,16 +87,22 @@ def fetch_earnings_dates(ticker: str) -> list:
 
 
 def annotate_earnings(df: pd.DataFrame, earnings_dates: list) -> pd.DataFrame:
-    """Add earnings_count: number of earnings events before each expiration."""
+    """Add earnings_count: 1 if the next earnings falls before an expiration,
+    else 0.
+
+    `earnings_dates` holds only the nearest event, so this is a 0/1 flag, not
+    a tally — the column name is kept for back-compat with the surface-fit
+    filter and the result tables that read it.
+    """
     if df.empty:
         return df
 
     today = date.today()
 
-    def _count(exp_str: str) -> int:
+    def _spans(exp_str: str) -> int:
         exp = date.fromisoformat(exp_str)
-        return sum(1 for d in earnings_dates if today < d <= exp)
+        return int(any(today < d <= exp for d in earnings_dates))
 
     df = df.copy()
-    df["earnings_count"] = df["expiration"].apply(_count)
+    df["earnings_count"] = df["expiration"].apply(_spans)
     return df

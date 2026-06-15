@@ -75,7 +75,7 @@ def _surface_fit_controls() -> str:
             help="Surface fit. Global = one polynomial across the chain + "
                  "raw IV+pp. Per-expiry (LGbengs) = per-expiration "
                  "spread-weighted fit, ranked by z-score. Both exclude "
-                 "earnings-spanning options from the fit.",
+                 "short-dated (≤60 DTE) earnings-spanning options from the fit.",
         )
     return preset
 
@@ -285,9 +285,12 @@ def tab_single() -> None:
                                             key="s_sf_use_min_oi")
                 sf_excl_earn = st.checkbox("Exclude earnings", value=True,
                                            key="s_sf_excl_earn",
-                                           help="Drop earnings-spanning options "
-                                                "from the fit — their IV premium "
-                                                "is legitimate event risk.")
+                                           help="Drop short-dated (≤60 DTE) "
+                                                "options spanning the next "
+                                                "earnings from the fit — their "
+                                                "IV premium is legitimate event "
+                                                "risk. Longer-dated contracts "
+                                                "stay in.")
                 sf_fresh = st.checkbox("Fresh quotes only", value=False,
                                        key="s_sf_fresh",
                                        help="Drop contracts that haven't "

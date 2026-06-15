@@ -46,12 +46,8 @@ from options_scanner.ui_theme import PALETTE, metric_card
 def _parse_expiration(value: Any) -> date:
     """Normalize an expiration date from various row formats to `date`.
 
-    Handles the scanner's display format ('Jul 17 26 1E') by stripping the
-    custom suffix before delegating to pandas — which already handles ISO,
-    US, and named-month formats.
+    pandas handles ISO, US, and named-month formats.
     """
-    if isinstance(value, str):
-        value = value.split(" 1E")[0].strip()
     return pd.to_datetime(value).date()
 
 

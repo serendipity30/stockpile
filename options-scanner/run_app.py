@@ -27,6 +27,7 @@ from options_scanner.tabs.live_charts import tab_live_charts
 from options_scanner.tabs.portfolio import tab_portfolio, tab_watchlist
 from options_scanner.tabs.single import tab_single
 from options_scanner.tabs.spreads import tab_directional, tab_neutral, tab_spreads
+from options_scanner.tabs.trades import tab_trades
 
 _FAVICON_PATH = Path(__file__).parent / "assets" / "favicon.png"
 st.set_page_config(
@@ -313,11 +314,11 @@ st.markdown(
 )
 
 (
-    panel_single, panel_watchlist, panel_portfolio, panel_gex,
+    panel_single, panel_watchlist, panel_trades, panel_portfolio, panel_gex,
     panel_spreads, panel_directional, panel_neutral,
     panel_live,
 ) = st.tabs(
-    ["Single Ticker", "Watchlist", "Portfolio", "GEX",
+    ["Single Ticker", "Watchlist", "Trades", "Portfolio", "GEX",
      "Spreads", "Directional", "Neutral", "Live Charts"]
 )
 
@@ -326,6 +327,9 @@ with panel_single:
 
 with panel_watchlist:
     tab_watchlist()
+
+with panel_trades:
+    tab_trades()
 
 with panel_portfolio:
     tab_portfolio()

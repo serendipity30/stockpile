@@ -26,9 +26,12 @@ vernacular and remain fine.
    **pluggable pipeline**:
    - **Filter** (`iv_filters.py`) — which options feed the regression.
      Defaults: OTM-only, spread ≤ 50% of mid, delta 0.10–0.95, and
-     earnings-spanning options excluded; an always-on sanity stage
-     (IV noise floor/ceiling, DTE > 0) is prepended via `with_sanity`.
-     Opt-in: min-OI and `fresh_quotes` (drop known-stale Yahoo quotes)
+     *short-dated* (≤ 60 DTE) earnings-spanning options excluded — long-
+     dated contracts stay in the fit, since one earnings is a negligible
+     share of their variance, and a guard keeps the filter from emptying
+     the fit; an always-on sanity stage (IV noise floor/ceiling, DTE > 0)
+     is prepended via `with_sanity`. Opt-in: min-OI and `fresh_quotes`
+     (drop known-stale Yahoo quotes)
    - **Algorithm** (`iv_algorithms.py`) — `global_poly` (default) or
      `per_expiration`; produces `iv_fitted`. Both accept `weights`
      (`oi` / `inv_spread` / `vega`) and `robust` (`huber` / `tukey`

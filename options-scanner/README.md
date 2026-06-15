@@ -386,7 +386,7 @@ Override the directory with `--output-dir path/to/dir`.
 ```
 --------------------------------------------------------------------
   AMD   spot: $355.26   LT close if opened today: May 06 '27
-  Upcoming earnings: May 05
+  Next earnings: May 05
 --------------------------------------------------------------------
 
   CALLS
@@ -431,12 +431,16 @@ A common covered call sweet spot is delta 0.25–0.40, which balances
 premium against assignment risk. Use `--delta-min 0.25 --delta-max
 0.40` to filter to that range.
 
-### Earnings tag
+### Earnings
 
-`1E` next to an expiration means one earnings event falls before
-that date. Elevated IV near earnings is expected and is not a free
-lunch — see [INTERPRETING_IV.md](INTERPRETING_IV.md#earnings-and-iv)
-for why.
+The scanner tracks the **next** earnings date only (further-out dates
+from the data source are estimates, not company-confirmed). The summary
+shows it ("Next earnings: …"), and a `⚠` next to an expiration in the
+ranked tables flags one that is **≤60 DTE and expires after that date**
+— so its IV+pp includes earnings premium (and it's the slice excluded
+from the surface fit). Elevated IV near earnings is expected and is not
+a free lunch — see
+[INTERPRETING_IV.md](INTERPRETING_IV.md#earnings-and-iv) for why.
 
 ### LT capital gains
 

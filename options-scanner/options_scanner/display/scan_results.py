@@ -18,7 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from options_scanner import iv_scores
-from options_scanner.format import fmt_strike
+from options_scanner.format import EARNINGS_WARN_LEGEND, fmt_strike
 from options_scanner.ui_theme import empty_state
 
 from options_scanner.display.chain_styling import (
@@ -57,12 +57,24 @@ def show_df(sub: pd.DataFrame, roll_close_cost: float | None = None,
 
     rank_col = {"Top": sub["_rank"]} if "_rank" in sub.columns else {}
     kind = iv_scores.active_kind(sub)
+
+    # ⚠ in the Expiration cell = short-dated (≤60 DTE) and expiring after the
+    # next earnings — its IV+pp carries event premium and it's the slice
+    # excluded from the surface fit.
+    _ec = (sub["earnings_count"].fillna(0) if "earnings_count" in sub.columns
+           else pd.Series(0, index=sub.index))
+
+    def _exp_cell(e, d, c):
+        base = datetime.strptime(e, "%Y-%m-%d").strftime("%b %d '%y")
+        return f"{base} ⚠" if (c >= 1 and d <= 60) else base
+
+    _has_warn = any(c >= 1 and d <= 60 for c, d in zip(_ec, sub["dte"]))
+
     cols = {
         **rank_col,
         "Strike": sub["strike"].apply(fmt_strike),
-        "Expiration": sub["expiration"].apply(
-            lambda e: datetime.strptime(e, "%Y-%m-%d").strftime("%b %d '%y")
-        ),
+        "Expiration": [_exp_cell(e, d, c) for e, d, c
+                       in zip(sub["expiration"], sub["dte"], _ec)],
         "DTE":    sub["dte"].astype(int),
         "Bid":    sub["bid"].round(2),
         "Ask":    sub["ask"].round(2),
@@ -110,7 +122,11 @@ def show_df(sub: pd.DataFrame, roll_close_cost: float | None = None,
                                                        width=45)
     col_cfg.update({
         "Strike":     st.column_config.TextColumn("Strike", width=75),
-        "Expiration": st.column_config.TextColumn("Expiration", width=105),
+        "Expiration": st.column_config.TextColumn(
+            "Expiration", width=115,
+            help="⚠ = ≤60 DTE and expiring after the next earnings, so its "
+                 "IV+pp includes event premium (and it's excluded from the "
+                 "surface fit)."),
         "DTE":   st.column_config.NumberColumn("DTE", format="%d", width=55),
         "Bid":   st.column_config.NumberColumn("Bid", format="$%.2f",
                                                width=70),
@@ -150,6 +166,8 @@ def show_df(sub: pd.DataFrame, roll_close_cost: float | None = None,
 
     st.dataframe(styled, column_config=col_cfg, hide_index=True,
                  width="stretch")
+    if _has_warn:
+        st.caption(EARNINGS_WARN_LEGEND)
     stamp_caption()
 
 

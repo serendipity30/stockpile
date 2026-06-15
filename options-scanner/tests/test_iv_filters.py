@@ -47,8 +47,32 @@ def test_empty_config_is_identity():
 
 
 def test_default_config_includes_exclude_earnings():
-    """exclude_earnings joined the default filter set 2026-06-10."""
-    assert ("exclude_earnings", frozenset()) in iv_filters.DEFAULT_CONFIG
+    """exclude_earnings joined the default filter set 2026-06-10 (DTE-gated
+    2026-06-15)."""
+    names = [n for n, _ in iv_filters.DEFAULT_CONFIG]
+    assert "exclude_earnings" in names
+
+
+def test_exclude_earnings_dte_gate_keeps_long_dated():
+    """Only short-dated earnings-spanners are dropped; long-dated stay in."""
+    import pandas as pd
+    df = pd.DataFrame({
+        "earnings_count": [1, 1, 0],
+        "dte": [30, 200, 200],   # short spanner, long spanner, long clean
+    })
+    out = iv_filters.apply(
+        df, (("exclude_earnings", frozenset({("max_dte", 60)})),))
+    # The 30-DTE spanner is dropped; both 200-DTE rows survive.
+    assert sorted(out["dte"].tolist()) == [200, 200]
+
+
+def test_exclude_earnings_guard_never_empties_fit():
+    """If every row is a short earnings-spanner, keep them rather than wipe."""
+    import pandas as pd
+    df = pd.DataFrame({"earnings_count": [1, 2], "dte": [20, 40]})
+    out = iv_filters.apply(
+        df, (("exclude_earnings", frozenset({("max_dte", 60)})),))
+    assert len(out) == 2  # guard returned the input rather than empty
 
 
 # ── sanity + with_sanity ─────────────────────────────────────────────────────

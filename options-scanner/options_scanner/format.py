@@ -14,6 +14,15 @@ from __future__ import annotations
 # "$12.75"). Mirrors `fmt_strike` below for f-string call sites.
 STRIKE_D3_FORMAT = "$,.2~f"
 
+# Legend for the ⚠ marker appended to short-dated, post-earnings
+# expiration cells in the ranked tables. Shown as an always-visible
+# caption under the table (st.dataframe has no per-cell hover; only the
+# column header carries a tooltip), so the meaning isn't hidden.
+EARNINGS_WARN_LEGEND = (
+    "⚠ next to a date = ≤60 DTE and expiring after the next earnings — its "
+    "IV+pp includes event premium (and it's excluded from the surface fit)."
+)
+
 
 def fmt_strike(strike) -> str:
     """Format an option strike as a dollar string.

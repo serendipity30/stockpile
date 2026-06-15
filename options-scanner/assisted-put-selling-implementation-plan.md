@@ -16,7 +16,7 @@ private repo at
    read-only quotes Yahoo/Schwab give us today. The whole flow is
    Schwab-gated.
 
-## Scope today (what's stubbed — DONE)
+## Scope today (what's built — DONE)
 
 - Per-row **investigate** control on the watchlist **Puts leaderboard**,
   gated to watchlist + Sell + Schwab (`allow_investigate` in
@@ -25,38 +25,63 @@ private repo at
     (mirrors the spreads-tab pattern), so the per-row control reuses the
     styled table rather than rebuilding it.
 - Selecting a put row opens `_investigate_put_dialog` (`@st.dialog`):
-  shows the live snapshot (bid/ask/mid/last, IV, volume, OI) and a
-  "Not implemented yet" notice previewing the planned go/no-go +
-  recommended limit + Place Trade gate. A disabled **Place Trade**
-  button marks where the gate will live.
+  shows the contract snapshot (bid/ask/mid/last, IV, volume, open
+  interest).
+- **Fill-quality + limit price (`trade_actions`).** `assess_fill` judges
+  executability from spread (% of mid OR small absolute) + open-interest
+  floor, volume as a soft note. Liquid → an **editable limit** (mid
+  rounded to tick) above the Place Trade button with credit/collateral.
+  Illiquid → **warn why**, but still offer an editable limit defaulted to
+  an **IV-aligned model price** (`model_limit` = Black-Scholes put at the
+  contract's own IV, carrying the IV+pp edge) so the user can place their
+  own limit anyway. `Place Trade` stays disabled (placement not built).
+- **2D IV chart in the dialog** — embeds `show_iv_chart` for the
+  ticker's puts so you can see how rich this one is vs the chain.
+- **Sizing** — Schwab buying capacity (`fetch_account_capacity`, cached
+  60s, read-only) + a **contracts-to-sell** input capped at
+  `puts_affordable`, and a validated **order preview**
+  (`build_put_sell_order`) showing the exact order, credit, collateral.
+- **Trades tab + store** (`tabs/trades.py`, `trades_store.py`) — lists
+  recorded put-sells with live **cost-to-close** + **unrealized P/L**
+  (Schwab re-quote) and a **closing-order preview**.
 
-Everything below is **not built yet**.
+The ONE thing deliberately left off: **actual order submission**. No
+`client.place_order` call exists anywhere; the Place Trade and Place
+Closing Trade buttons are disabled. Everything else is built around that
+gate. Live re-quote runs in the Trades tab; the dialog still assesses the
+scan snapshot. The Trades tab stays empty until placement is enabled.
 
 ## Phase 1 — Fill-quality check (read-only, no order)
 
 The "is this *executable* well right now?" judgment — distinct from the
 IV+pp ranking, which already answers "is this a good trade?".
 
-- **New module** `options_scanner/trade_actions.py` (or `assist.py`):
-  - `assess_fill(contract) -> FillAssessment` taking bid, ask, last,
-    mid, IV, volume, OI.
-  - Signals to combine: bid/ask spread width (absolute **and** as % of
-    mid), OI floor, today's-volume floor, last-vs-mid sanity. Output:
-    `go | no-go` + `reason` + `suggested_limit`.
-  - Limit-price policy: start with **mid**, optionally one tick inside
-    the spread; expose an "aggressive vs. patient" choice later (open
-    question). Round to the contract's tick size.
-- **Live re-quote on click.** The leaderboard snapshot can be minutes
-  old; re-fetch the single contract's quote from Schwab inside the
-  dialog before assessing (reuse `stocks_shared.schwab_live`). Show the
-  fetch time.
-- **Dialog upgrade.** Replace the stub body with: the assessment verdict
-  (color-coded go/no-go), the reasoning, the recommended limit price
-  (editable `st.number_input`), and the contract collateral
-  (`strike × 100`). Surface the "no-go" path explicitly (wide spread,
-  thin OI → recommend waiting).
-- **Tests.** Unit-test `assess_fill` over tight/wide/thin fixtures
-  (golden go and no-go cases). Add to the options-scanner test backlog.
+- **DONE — module** `options_scanner/trade_actions.py`:
+  - `assess_fill(...) -> FillAssessment` from bid, ask, mid, volume, OI.
+  - Signals: bid/ask spread (% of mid **or** small absolute), OI floor;
+    volume is a soft note (it's 0 for everything while the market is
+    closed, so it can't gate). Output: `liquid` + `reasons` +
+    `suggested_limit` + `notes`. Still TODO: last-vs-mid sanity.
+  - Limit-price policy: liquid → **mid**, rounded to tick
+    (`round_to_tick`); illiquid → **IV-aligned** BS price (`model_limit`)
+    at the contract's own IV. TODO: one-tick-inside / "aggressive vs.
+    patient" choice (open question); authoritative tick rules from Schwab.
+- **DONE — dialog.** Editable limit `st.number_input` (override) with
+  credit/collateral, directly above Place Trade. Liquid anchors on the
+  mid; illiquid warns but still defaults the input to the IV-aligned
+  model price so a trade can be priced and placed regardless.
+- **DONE — 2D IV chart in the dialog.** Embeds `show_iv_chart` for the
+  ticker's puts (full chain threaded from `results` through
+  `render_leaderboard` → `_render_table`), so the user sees how IV-rich
+  this put is vs the chain. TODO: highlight the selected strike (the
+  chart shows all puts; the selected one isn't called out yet).
+- **DONE — `requote_put`** (read-only, reuses
+  `schwab_live.fetch_option_chain_schwab`). Used for cost-to-close in the
+  Trades tab. TODO: also re-quote inside the dialog before assessing and
+  show a fetch time (dialog still uses the scan snapshot).
+- **DONE — tests** (`tests/test_trade_actions.py`): tick rounding,
+  assess_fill (liquid/wide+thin/cheap-rescue/one-sided), model_limit,
+  puts_affordable, build_put_sell_order + validation/capacity guard.
 
 ## Phase 2 — Place the order (the gate)
 
@@ -65,56 +90,47 @@ IV+pp ranking, which already answers "is this a good trade?".
   trading-enabled, the order-entry endpoint. Builds on the existing
   `schwab_auth.py` flow (7-day token TTL). Document the re-auth /
   permission steps the way ep2 did for quotes.
-- **Paper/sandbox first.** Confirm a Schwab paper/sandbox order path
-  exists; the ep9 demo and our own testing must use it. Add a clear
-  **paper-mode indicator** in the UI and a config flag
-  (`[schwab] paper = true`) so live orders are opt-in.
-- **Put-selling capacity.** Pull the account's available cash (and
-  margin available, if a margin account) from Schwab, and show **how
-  much we could sell** — how many of this put the account can secure =
-  available cash (or margin) ÷ (strike × 100). Surface it in the
-  investigate dialog so sizing is informed before the order builder, and
-  use it as the cap / default for the quantity input below.
-- **Order builder** in `trade_actions.py`:
-  - `build_put_sell_order(contract, limit, qty) -> order_payload` —
-    single-leg SELL_TO_OPEN PUT, LIMIT, DAY (or GTC?), quantity.
-  - **Validate before send:** type == put, action == sell-to-open,
-    single leg, qty ≥ 1, limit > 0, and total collateral
-    (qty × strike × 100) ≤ available cash / margin (the put-selling
-    capacity above). Raise on anything else (guardrail #1 enforced here,
-    not in the UI).
-  - `place_order(client, account_hash, payload)` → return Schwab order
-    id + status. Handle reject/error and surface it.
-- **Approval-gate UI.** A **number-of-contracts input** (qty, default 1,
-  capped at the put-selling capacity above) — the credit, collateral,
-  and remaining capacity update live as qty changes. The Place Trade
-  button becomes enabled only after a "go" assessment; clicking shows a
-  final confirm with the exact order ("SELL 2 AAPL 2026-01-16 $180 PUT @
-  $2.35 limit, collateral $36,000") and a paper/live badge. Record the
-  result.
+- **DONE (config) — paper flag.** `get_schwab_config` exposes
+  `paper` (default **True**) so live orders are an explicit opt-in. TODO:
+  confirm Schwab's paper/sandbox order path exists; add a paper-mode
+  badge once placement is wired.
+- **DONE — put-selling capacity.** `fetch_account_capacity` reads
+  available cash / buying power (read-only, `get_account_numbers` +
+  `get_account`), cached 60s in the dialog. `puts_affordable` =
+  capacity ÷ (strike × 100) caps the quantity input.
+- **DONE — order builder (validation only).** `build_put_sell_order`
+  returns a `PutSellOrder` (credit/collateral/describe) and enforces
+  guardrail #1 (qty ≥ 1, limit > 0, strike > 0, collateral ≤ capacity).
+  TODO: map it to schwab-py `option_sell_to_open_limit` +
+  `client.place_order` — **intentionally not wired** ("don't allow
+  trades"). The dialog shows the order preview; Place Trade is disabled.
+- **DONE — approval-gate UI (minus the gate).** Contracts-to-sell input
+  (capped by capacity), capacity metric, and a live order preview
+  (order string + credit + collateral) in the dialog. TODO: enable Place
+  Trade after a "go" + a final confirm step + paper/live badge + record
+  to the store.
+- **Schwab trading scope** (still TODO) — confirm OAuth scope / account
+  trading-enabled / order-entry endpoint before wiring `place_order`.
 
 ## Phase 3 — Trade tracker tab (P/L + closing)
 
-A new top-level tab ("Trades") — **structural change, confirm with the
-user before adding**.
+**DONE (scaffold).** New top-level "Trades" tab (`tabs/trades.py`, wired
+into `run_app.py` after Watchlist). Empty until placement is enabled.
 
-- **Store.** Decide persistence (open question). Likely a local JSON
-  (like watchlists, in a gitignored dir) recording each placed order:
-  ticker, strike, expiration, qty, credit received, Schwab order id,
-  placed-at, paper/live, status. Optionally reconcile against a live
-  Schwab positions/orders pull each session (hybrid).
-- **Per-position view:**
-  - Live **cost-to-close** = current ask/mid to buy the put back
-    (re-quote via Schwab).
-  - Running **expected/unrealized P/L** = credit received − current
-    close cost (× 100 × qty).
-  - Status (open / expired / closed / assigned), DTE, LT-cap-gains
-    qualifying date (reuse existing logic).
-- **Closing flow:** "Suggest close limit" (mirror Phase 1 policy for a
-  BUY_TO_CLOSE), let the user edit it, then a Place Closing Trade button
-  → `build_put_close_order` (BUY_TO_CLOSE PUT, LIMIT) → `place_order`.
-  Same guardrails and confirm gate.
-- **Verify-at-broker caveat** shown throughout (numbers are estimates).
+- **DONE — store** (`trades_store.py`): single gitignored JSON
+  (`options-scanner/trades/`) with `load/add/update/remove`; records
+  ticker, strike, expiration, qty, credit, status, paper, order_id,
+  opened_at, close_cost, closed_at. TODO: optional reconcile against a
+  live Schwab positions/orders pull.
+- **DONE — per-position view:** live **cost-to-close** (`requote_put`
+  mid, cached 30s) and **unrealized P/L** (credit − close cost) × 100 ×
+  qty, plus status. TODO: DTE + LT-cap-gains qualifying date.
+- **DONE — closing flow UI (disabled):** suggested close limit
+  (re-quote mid → tick), editable, with a disabled **Place Closing
+  Trade** button. TODO: `build_put_close_order` (BUY_TO_CLOSE PUT, LIMIT)
+  → `place_order`, same guardrails + confirm; flip status to closed in
+  the store.
+- **DONE — verify-at-broker caveat** shown throughout.
 
 ## Schwab API specifics to confirm
 

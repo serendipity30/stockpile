@@ -730,7 +730,8 @@ def _render_scan_tab(is_watchlist: bool, k: str) -> None:
         render_leaderboard(results, stored_side, int(port_min_oi),
                            int(port_top), int(port_min_vol),
                            delta_range=port_delta_range, buy=stored_buy,
-                           allow_investigate=_allow_investigate)
+                           allow_investigate=_allow_investigate,
+                           provider=_lb_provider)
 
     for res in results:
         pos    = res["position"]

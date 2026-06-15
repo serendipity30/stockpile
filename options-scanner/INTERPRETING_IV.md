@@ -81,8 +81,13 @@ A rough heuristic for what the magnitudes mean in practice:
 
 ## Earnings and IV
 
-`1E` next to an expiration means one earnings event falls before
-that date. Elevated IV near earnings is expected and is not a free
+The scanner tracks only the **next** earnings date — further-out
+dates the data source returns are estimates from the historical
+cadence, not company-confirmed, so it treats earnings as a single
+upcoming event. A `⚠` next to an expiration flags one that is **≤60 DTE
+and expires after that date**: its IV (and so its IV+pp) carries
+earnings premium, and it's the slice excluded from the surface fit.
+Elevated IV near earnings is expected and is not a free
 lunch — the market is pricing in the uncertainty of the
 announcement. Selling into earnings IV is a strategy in itself
 (short straddle / iron condor / etc.), but it goes beyond what
@@ -107,6 +112,13 @@ pipeline to remove quotes that would distort the surface:
   excluded by default; the 0.10 floor drops far-OTM wings whose
   thin, wide-spread quotes (and unreliable broker IV) would
   otherwise distort the surface curvature
+- **Earnings (short-dated only)** — options expiring within 60 DTE
+  that span the next earnings carry a jump premium that would pull
+  the surface up, so they're left out of the fit. Longer-dated
+  contracts stay in: one earnings is a negligible share of their
+  variance, and excluding them would needlessly thin — or, at long
+  DTE, empty — the fit. A guard keeps this filter from ever emptying
+  the fit subset
 
 These defaults are configurable under the **Advanced surface fit**
 expander in the Single Ticker tab (the **Fit:** preset toggle picks

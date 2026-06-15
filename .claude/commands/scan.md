@@ -75,7 +75,9 @@ weighting. `--robust {none,huber,tukey}` — robust fit: downweight
 (huber) or reject (tukey) outliers so a stale print can't drag the
 surface toward itself. `--score {raw_pp,zscore,relative,
 composite_exec,vrp,percentile}` — override the ranking score.
-Both presets exclude earnings-spanning options from the fit.
+Both presets exclude short-dated (≤60 DTE) options spanning the next
+earnings from the fit; longer-dated contracts stay in (one earnings is
+a negligible share of their variance).
 
 ## Reading IV+pp
 

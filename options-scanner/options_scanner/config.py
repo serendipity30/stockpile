@@ -61,6 +61,9 @@ def get_schwab_config(cfg: dict) -> dict:
         "app_secret":   s.get("app_secret", ""),
         "callback_url": s.get("callback_url", "https://127.0.0.1:8182/"),
         "token_file":   s.get("token_file", "~/.config/schwab-token.json"),
+        # Forward-looking: when order placement is enabled, default to
+        # paper/sandbox so live orders are an explicit opt-in.
+        "paper":        bool(s.get("paper", True)),
     }
 
 

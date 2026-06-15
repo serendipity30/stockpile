@@ -79,18 +79,31 @@ def _min_oi(df: pd.DataFrame, min_oi: int = 1) -> pd.DataFrame:
     return df[df["open_interest"] >= min_oi]
 
 
-def _exclude_earnings(df: pd.DataFrame) -> pd.DataFrame:
-    """Drop options whose expiration spans an earnings event.
+def _exclude_earnings(df: pd.DataFrame, max_dte: int = 60) -> pd.DataFrame:
+    """Drop only *short-dated* options that span an upcoming earnings event.
 
-    Earnings-spanning contracts carry a legitimate IV premium (the
-    market pricing the jump), so leaving them in the regression pulls
-    the fitted surface upward. Excluding them lets the surface reflect
-    the non-event baseline; the excluded rows still receive iv_fitted
-    and iv_excess from that cleaner fit.
+    Earnings inject a roughly fixed jump variance. For a short-dated option
+    spanning the next print, that jump is a large share of its total
+    variance, so its IV is genuinely inflated and would pull the fitted
+    surface up — keep it out of the regression. For longer-dated options the
+    same jump is a tiny share of variance, so it barely moves their IV;
+    excluding them (the old "earnings_count > 0" rule, regardless of DTE)
+    needlessly thinned — and at long DTE *emptied* — the fit, collapsing
+    IV+pp to ≈ 0. So we only exclude when DTE <= `max_dte`.
+
+    Excluded rows still receive iv_fitted/iv_excess from the cleaner fit
+    (their earnings premium shows up as positive excess), and the UI marks
+    earnings-spanning contracts so nothing is hidden.
+
+    Guard: never let this filter empty the fit subset — if every remaining
+    row is a short earnings-spanner, keep them rather than collapse the fit.
     """
     if "earnings_count" not in df.columns:
         return df
-    return df[df["earnings_count"].fillna(0) <= 0]
+    spans = df["earnings_count"].fillna(0) >= 1
+    short = df["dte"] <= max_dte if "dte" in df.columns else True
+    kept = df[~(spans & short)]
+    return kept if not kept.empty else df
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
@@ -128,8 +141,8 @@ REGISTRY: dict[str, dict] = {
     },
     "exclude_earnings": {
         "fn":       _exclude_earnings,
-        "defaults": {},
-        "label":    "Exclude earnings-spanning options",
+        "defaults": {"max_dte": 60},
+        "label":    "Exclude short-dated earnings-spanning options (≤ max DTE)",
     },
 }
 
@@ -138,15 +151,17 @@ REGISTRY: dict[str, dict] = {
 # spreads, unreliable broker IV) that otherwise dominate the surface
 # curvature; 0.95 is a guard for the non-default case where OTM-only
 # is off (it never binds while OTM-only caps |delta| near 0.5).
-# exclude_earnings joined the defaults 2026-06-10: earnings-spanning
-# contracts carry legitimate jump premium that pulls the surface up
+# exclude_earnings joined the defaults 2026-06-10: short-dated
+# earnings-spanning contracts carry jump premium that pulls the surface up
 # and distorts every other contract's excess (they still receive
-# iv_fitted/iv_excess from the cleaner fit).
+# iv_fitted/iv_excess from the cleaner fit). It is DTE-gated (≤ 60d) as of
+# 2026-06-15 so long-dated contracts — where one earnings is a negligible
+# share of variance — stay in the fit instead of emptying it.
 DEFAULT_CONFIG: SurfaceFilterConfig = (
     ("otm_only",         frozenset()),
     ("spread_pct",       frozenset({("max_pct", 0.50)})),
     ("delta_range",      frozenset({("lo", 0.10), ("hi", 0.95)})),
-    ("exclude_earnings", frozenset()),
+    ("exclude_earnings", frozenset({("max_dte", 60)})),
 )
 
 
