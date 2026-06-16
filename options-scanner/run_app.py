@@ -1,7 +1,9 @@
 """Streamlit web UI for the options scanner."""
 
 import asyncio
+import json
 import sys
+from datetime import datetime, timedelta
 
 # Streamlit's internal async handling is incompatible with Windows's default
 # ProactorEventLoop on Python 3.12+. Switch to the Selector policy before
@@ -74,6 +76,40 @@ _schwab_configured = (
     and bool(_cfg_schwab.get("app_secret"))
     and not _cfg_schwab["app_secret"].startswith("your-")
 )
+
+# Schwab refresh-token countdown — shown in the data-source toggle label and
+# (color-coded) the sidebar badge. Computed once per rerun; updates on any
+# interaction (no auto-refresh — a day/hour readout doesn't need to-the-second
+# accuracy, and an expired token also surfaces via the re-auth hint on scan).
+_schwab_tok_label = None   # "6D" / "13H" / "46M" / "expired" / "re-auth"
+_schwab_tok_color = None   # set => override sidebar badge (amber soon / red)
+_schwab_tok_tip = None     # exact remaining, shown as hover text on the toggle
+if _schwab_configured:
+    from stocks_shared.schwab_live import token_remaining_seconds
+    _secs = token_remaining_seconds(_cfg_schwab.get("token_file", ""))
+    if _secs is None:
+        _schwab_tok_label, _schwab_tok_color = "re-auth", "#ef4444"
+        _schwab_tok_tip = "Schwab token not found - run schwab_auth.py"
+    elif _secs <= 0:
+        _schwab_tok_label, _schwab_tok_color = "expired", "#ef4444"
+        _schwab_tok_tip = "Schwab token expired - run schwab_auth.py"
+    else:
+        if _secs >= 86400:
+            _schwab_tok_label = f"{int(_secs // 86400)}D"
+        elif _secs >= 3600:
+            _schwab_tok_label = f"{int(_secs // 3600)}H"
+        else:
+            _schwab_tok_label = f"{max(int(_secs // 60), 1)}M"
+        _schwab_tok_color = ("#ef4444" if _secs < 7200          # red < 2h
+                             else "#f59e0b" if _secs < 86400     # amber < 1d
+                             else None)
+        _d, _r = divmod(int(_secs), 86400)
+        _h, _r = divmod(_r, 3600)
+        _m = _r // 60
+        _exp = datetime.now().astimezone() + timedelta(seconds=_secs)
+        _schwab_tok_tip = (f"Schwab token: {_d}d {_h}h {_m}m left - "
+                           f"re-auth by {_exp:%a %b %d %I:%M %p}")
+
 if "data_source_choice" not in st.session_state:
     if _cfg_provider == "schwab" and _schwab_configured:
         st.session_state["data_source_choice"] = "schwab"
@@ -141,6 +177,7 @@ st.iframe(
     <script>
     (function() {
         const doc = window.parent.document;
+        const SCHWAB_TIP = __SCHWAB_TIP__;
 
         // Sidebar-open state — drives pill positioning CSS.
         const syncSidebar = () => {
@@ -166,7 +203,20 @@ st.iframe(
             );
         };
 
-        const sync = () => { syncSidebar(); syncTheme(); };
+        // Exact token-expiry tooltip on the Schwab segment, re-applied after
+        // every rerun (Streamlit rebuilds the buttons and drops the title).
+        const syncSchwabTip = () => {
+            if (!SCHWAB_TIP) return;
+            const pill = doc.querySelector('[class*="st-key-data_source_pill"]');
+            if (!pill) return;
+            pill.querySelectorAll('button').forEach((b) => {
+                if ((b.innerText || '').trim().indexOf('Schwab') === 0) {
+                    b.title = SCHWAB_TIP;
+                }
+            });
+        };
+
+        const sync = () => { syncSidebar(); syncTheme(); syncSchwabTip(); };
         sync();
         const obs = new MutationObserver(sync);
         obs.observe(doc.body, {
@@ -177,7 +227,7 @@ st.iframe(
         window.addEventListener('resize', sync);
     })();
     </script>
-    """,
+    """.replace("__SCHWAB_TIP__", json.dumps(_schwab_tok_tip)),
     height=1, width=1,
 )
 
@@ -189,7 +239,9 @@ def _source_label(s: str) -> str:
         return "Yahoo Finance"
     if s == "moomoo":
         return "Moomoo (live)"
-    return "Schwab (live)" if _schwab_configured else "Schwab (unconfigured)"
+    if not _schwab_configured:
+        return "Schwab (unconfigured)"
+    return f"Schwab ({_schwab_tok_label})" if _schwab_tok_label else "Schwab"
 
 with st.container(key="data_source_pill"):
     _source_raw = st.segmented_control(
@@ -260,6 +312,9 @@ with st.sidebar:
     section_header("Data source", eyebrow="ACTIVE PROVIDER")
     _src_label = _source_label(data_source)
     _src_color = PROVIDER_COLORS.get(data_source, "#94a3b8")
+    # Tint the badge by token life: amber < 1 day, red < 2h / expired.
+    if data_source == "schwab" and _schwab_tok_color:
+        _src_color = _schwab_tok_color
     st.markdown(
         f"<div style='font-size:0.86rem; margin-bottom:0.4rem;'>"
         f"<span style='display:inline-block; padding:0.2rem 0.65rem; "

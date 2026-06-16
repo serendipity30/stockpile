@@ -30,6 +30,18 @@ def token_age_days(token_file: str) -> float | None:
     except (OSError, ValueError, TypeError):
         return None
 
+
+def token_remaining_seconds(token_file: str) -> float | None:
+    """Seconds until the Schwab refresh token's 7-day TTL elapses.
+
+    Negative once expired; None when the token file is missing/unreadable.
+    Lets the UI show a countdown to the next required re-auth.
+    """
+    age = token_age_days(token_file)
+    if age is None:
+        return None
+    return (SCHWAB_REFRESH_TOKEN_TTL_DAYS - age) * 86400.0
+
 # Schwab uses $NAME for cash-settled index options.
 _SCHWAB_INDEX_TICKERS = frozenset({
     "SPX", "SPXW", "NDX", "NDXP", "RUT",
