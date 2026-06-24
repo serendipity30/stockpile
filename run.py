@@ -91,6 +91,34 @@ def _wait_for_dashboard(timeout: float = 15.0) -> bool:
     return False
 
 
+def _stop(proc: subprocess.Popen, label: str) -> None:
+    """Stop a child process *and all its descendants*, cross-platform.
+
+    A plain ``terminate()`` only signals the immediate child. Streamlit
+    spawns a grandchild that holds the :8501 server socket, and on Windows
+    our Flask child runs in its own process group — so terminating just the
+    top process leaves orphans behind that keep the ports bound and the
+    terminal looking hung (the reason Ctrl+C felt like it did nothing).
+
+    Windows: ``taskkill /T /F`` reaps the whole tree. Elsewhere: terminate,
+    then escalate to kill if it doesn't exit promptly.
+    """
+    if proc.poll() is not None:
+        return  # already exited
+    print(f"[run] Stopping {label} ...")
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    else:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def main() -> int:
     dashboard = None  # only set if WE started it (so we only stop ours)
 
@@ -122,15 +150,14 @@ def main() -> int:
     try:
         scanner.wait()  # blocks until Streamlit exits (or Ctrl+C)
     except KeyboardInterrupt:
-        scanner.terminate()
+        print("[run] Ctrl+C received — shutting down ...")
     finally:
+        # Tree-kill both children so no Streamlit grandchild or Flask
+        # process-group orphan survives to hold a port. `dashboard` is only
+        # set when WE started it, so a reused dashboard is left untouched.
+        _stop(scanner, "options scanner")
         if dashboard is not None:
-            print("[run] Shutting down trading dashboard ...")
-            dashboard.terminate()
-            try:
-                dashboard.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                dashboard.kill()
+            _stop(dashboard, "trading dashboard")
     return 0
 
 
