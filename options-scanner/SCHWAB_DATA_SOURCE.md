@@ -147,6 +147,34 @@ is effectively a no-op (ACL-based). If you granted only Market Data
 (step 1), the token can't read your account or place trades even if it
 leaks; if you added Accounts and Trading, it can — secure it accordingly.
 
+#### Alternative: VS Code Remote-SSH (browser flow on a remote host)
+
+Contributed by BitraAI. If you reach the remote host through VS Code's
+Remote-SSH, you can skip `--manual` entirely — VS Code forwards the
+loopback callback port back to your laptop, so the normal browser flow
+works as if you were running locally.
+
+1. Open VS Code **Settings** and uncheck **Remote.SSH: Use Exec
+   Server**.
+2. **Add New SSH Host…** and log in to the remote host.
+3. Update `app_key` and `app_secret` in
+   `stockpile/options-scanner/config.toml`.
+4. Create the config dir (if needed) and run the auth script:
+
+```bash
+mkdir .config
+cd stockpile
+uv run options-scanner/schwab_auth.py
+```
+
+This opens a browser to log in to Schwab. Once complete, you'll see:
+
+```
+schwab-py callback received! You may now close this window/tab.
+```
+
+The token is saved to `~/.config/schwab-token.json`.
+
 ### What's stored, and where to secure it
 
 Two files hold secrets, and they live **together on whichever single host

@@ -815,26 +815,58 @@ def render_schwab_reauth_hint(provider: str, key: str = "schwab_reauth",
     )
     age = token_age_days(token_file) if token_file else None
 
-    if age is not None and age >= SCHWAB_REFRESH_TOKEN_TTL_DAYS:
-        st.error(f"Your saved Schwab token is **{age:.1f} days old** — past "
-                 f"Schwab's {SCHWAB_REFRESH_TOKEN_TTL_DAYS:.0f}-day limit, so "
-                 "it has expired. From your **stockpile** directory, "
-                 "re-authenticate in a terminal, then rescan:")
+    expired = age is not None and age >= SCHWAB_REFRESH_TOKEN_TTL_DAYS
+
+    # Red styling for the Re-authenticate button (applies in every branch).
+    st.markdown(
+        ("<style>"
+         "[class*='st-key-KEY'] button{background:#d9534f !important;"
+         "border-color:#d9534f !important;}"
+         "[class*='st-key-KEY'] button:hover{background:#c9302c !important;"
+         "border-color:#c9302c !important;}"
+         "[class*='st-key-KEY'] button p{color:#fff !important;}"
+         "</style>").replace("KEY", key),
+        unsafe_allow_html=True,
+    )
+
+    def _reauth_button() -> None:
+        st.button("Re-authenticate", key=key, on_click=_reauth_clicked,
+                  help="Opens a terminal window running the command below — "
+                       "on the machine running the scanner, so for remote "
+                       "hosts run it there manually instead.")
+
+    if expired:
+        # st.error can't host a button, so hand-build a matching red callout
+        # that holds the message *and* the Re-authenticate button together.
+        _box = f"{key}_box"
+        st.markdown(
+            ("<style>"
+             "[class*='st-key-BOX']{background:#fdecea;"
+             "border-left:4px solid #d9534f;border-radius:0.5rem;"
+             "padding:0.9rem 1rem 0.4rem 1rem;}"
+             "</style>").replace("BOX", _box),
+            unsafe_allow_html=True,
+        )
+        with st.container(key=_box):
+            st.markdown(
+                f"Your saved Schwab token is **{age:.1f} days old** — past "
+                f"Schwab's {SCHWAB_REFRESH_TOKEN_TTL_DAYS:.0f}-day limit, so "
+                "it has expired. Re-authenticate, then rescan.")
+            _reauth_button()
     elif age is not None:
         st.info(f"Your saved Schwab token is only **{age:.1f} days old** "
                 f"({SCHWAB_REFRESH_TOKEN_TTL_DAYS:.0f}-day limit), so token "
                 "expiry is likely **not** the cause — check the ticker "
                 "symbols, DTE window, and your network first. If Schwab "
-                "fetches still fail, re-authenticate and rescan:")
+                "fetches still fail, re-authenticate and rescan.")
+        _reauth_button()
     else:
         st.info("Using **Schwab**? A common cause is the saved token expiring "
-                "(7-day limit). From your **stockpile** directory, "
-                "re-authenticate in a terminal, then rescan:")
+                "(7-day limit). Re-authenticate, then rescan.")
+        _reauth_button()
+
+    st.markdown("Or run this command from your **stockpile** directory:")
     st.code(_SCHWAB_AUTH_CMD, language="bash")
-    st.button("Re-authenticate now", key=key, on_click=_reauth_clicked,
-              help="Opens a terminal window running the command above — "
-                   "on the machine running the scanner, so for remote "
-                   "hosts run it there manually instead.")
 
 
 def metric_card(
