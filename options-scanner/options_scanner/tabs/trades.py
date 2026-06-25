@@ -356,7 +356,15 @@ def tab_trades() -> None:
         # (filled / working / …) when we have it. Fetched in the parallel
         # prefetch above; None when not applicable or the read timed out.
         bs = status_by_id.get(t.get("id"))
+        # Opening-order fill state (bs = the opening order's broker status).
+        # Computed here so both the cards and the action branches below can use
+        # them. A still-working opening order isn't a position yet, so its cards
+        # show the pending order rather than P/L (see _render_pending_cards).
+        working = bool(bs and bs.get("cancelable"))
+        filled = bool(bs and bs.get("status") == "FILLED")
+        is_paper = bool(t.get("paper"))
         _store_status = t.get("status", "open")
+        _pending_open = _store_status == "open" and working
         _disp_status = ((bs.get("status") or _store_status).lower()
                         if _store_status == "open" and bs else _store_status)
         label = (f"{t.get('ticker', '?')} ${t.get('strike', '?')} PUT — "
@@ -494,8 +502,29 @@ def tab_trades() -> None:
                 with cols[3]:
                     metric_card("STATUS", _disp_status.upper())
 
+            def _render_pending_cards(cols):
+                # Working opening order: not a position yet, so show what the
+                # order WOULD do on fill (credit collected, collateral tied up)
+                # instead of cost-to-close / P/L, which don't apply until fill.
+                # STATUS goes in cols[3] (under COLLATERAL) to match a filled
+                # trade, where STATUS sits under COST TO CLOSE; cols[2]
+                # (bottom-left) is left empty.
+                _strike_v = float(t.get("strike", 0))
+                with cols[0]:
+                    metric_card("CREDIT IF FILLED", f"${total_credit:,.0f}",
+                                delta=f"${credit_ps:.2f}/sh", delta_sign="neutral")
+                with cols[1]:
+                    metric_card("COLLATERAL", f"${_strike_v * 100 * qty:,.0f}",
+                                delta=f"${_strike_v:g} × 100 × {qty}",
+                                delta_sign="neutral")
+                with cols[3]:
+                    metric_card("STATUS", _disp_status.upper())
+
             # Open position: details (two columns) left, cards as a 2x2 grid
-            # right. No snapshot (closed/canceled): cards span full width.
+            # right. No snapshot (closed/canceled): cards span full width. A
+            # working opening order uses the same grid/row, just with order-
+            # pending cards (3 of the 4 cells filled — P/L doesn't apply yet).
+            _card_fn = _render_pending_cards if _pending_open else _render_cards
             if _has_snapshot:
                 _details_col, _cards_col = st.columns([1, 1])
                 with _details_col:
@@ -509,9 +538,9 @@ def tab_trades() -> None:
                 with _cards_col:
                     _row1 = st.columns(2)
                     _row2 = st.columns(2)
-                    _render_cards([_row1[0], _row1[1], _row2[0], _row2[1]])
+                    _card_fn([_row1[0], _row1[1], _row2[0], _row2[1]])
             else:
-                _render_cards(st.columns(4))
+                _card_fn(st.columns(4))
 
             # Closing order in flight: a live buy-to-close is working. Keep
             # tracking the position — poll the close order, offer Cancel, and
@@ -619,10 +648,8 @@ def tab_trades() -> None:
                         _ccres["msg"].replace("$", "\\$"))
                 continue
 
-            # Broker order status (`bs`) was fetched above for the title.
-            working = bool(bs and bs.get("cancelable"))
-            is_paper = bool(t.get("paper"))
-            filled = bool(bs and bs.get("status") == "FILLED")
+            # Broker order status (`bs`) was fetched above for the title;
+            # working / filled / is_paper were derived from it near the top.
             if bs is not None:
                 if filled:
                     # filledQuantity / quantity = contracts filled of ordered
