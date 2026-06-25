@@ -213,6 +213,16 @@ def tab_trades() -> None:
     # snaps the view back to the first tab.
     provider = st.session_state.get("data_source", "yahoo")
     scfg = st.session_state.get("schwab_config") or {}
+    # Current order mode (config `paper` flag) as a badge beside the Trades
+    # title, so it's obvious at a glance — on first load too — whether placing
+    # or closing a trade goes live or is simulated.
+    _paper_mode = bool(scfg.get("paper", True))
+    _mode_badge = (
+        " <span style='font-size:0.5em;font-weight:700;vertical-align:middle;"
+        "margin-left:6px;padding:2px 9px;border-radius:7px;"
+        + ("background:#334155;color:#cbd5e1;'>📝 PAPER</span>"
+           if _paper_mode else
+           "background:#b91c1c;color:#fff;'>🔴 LIVE</span>"))
     # Market-hours gate for live closing (None = unknown → fail safe).
     market_open = (_market_open(scfg.get("app_key", ""),
                                 scfg.get("app_secret", ""),
@@ -222,7 +232,7 @@ def tab_trades() -> None:
 
     trades = trades_store.load()
     if not trades:
-        section_header(title="Trades")
+        section_header(title=f"Trades{_mode_badge}")
         st.info(
             "No trades yet. Put-sells you place from the **Watchlist** "
             "leaderboard's *Sell Put* dialog appear here with live P/L and a "
@@ -240,7 +250,7 @@ def tab_trades() -> None:
               f"open</span>")
     _th, _tr = st.columns([8, 1], vertical_alignment="bottom")
     with _th:
-        section_header(title=f"Trades{_count}")
+        section_header(title=f"Trades{_mode_badge}{_count}")
     with _tr:
         if st.button("🔄", key="trades_refresh",
                      help="Re-fetch order status, quotes, and spot."):
@@ -351,7 +361,7 @@ def tab_trades() -> None:
                         if _store_status == "open" and bs else _store_status)
         label = (f"{t.get('ticker', '?')} ${t.get('strike', '?')} PUT — "
                  f"{exp_disp} · {qty}x · {_disp_status}"
-                 + ("  ·  PAPER" if t.get("paper") else ""))
+                 + ("  ·  📝 PAPER" if t.get("paper") else "  ·  🔴 LIVE"))
 
         with st.expander(label, expanded=False):
             # Live re-quote for cost-to-close (Schwab, read-only) — fetched in
