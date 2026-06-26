@@ -605,16 +605,17 @@ def tab_trades() -> None:
                     st.rerun(scope="fragment")
                 _cstat = cbs.get("status") if cbs else None
                 _close_working = bool(cbs and cbs.get("cancelable"))
-                # Terminal but not FILLED → the buy-to-close never executed (a
-                # day order that EXPIRED at the close, or was CANCELED/REJECTED
-                # at the broker). The position is still open, so let the user
-                # reopen and try closing again next session.
+                # Terminal but not FILLED → the buy-to-close never (fully)
+                # executed (a day order that EXPIRED at the close, or was
+                # CANCELED/REJECTED at the broker). Don't leave the trade stuck
+                # in "closing": book any filled contracts and return the rest to
+                # a normal open position automatically, with a one-time note.
                 if cbs and not _close_working and _cstat != "FILLED":
                     _filled_n = int(float(cbs.get("filled") or 0))
                     if _filled_n > 0:
-                        # Partially filled, then the order terminated: book the
-                        # filled contracts as closed and keep the rest open and
-                        # monitored (a split, same as a deliberate partial close).
+                        # Partial fill then terminal: book the filled contracts
+                        # and keep the remainder open (a split, like a partial
+                        # close).
                         _fill_px = cbs.get("fill_price")
                         _cost = (round(_fill_px, 2) if _fill_px is not None
                                  else _lim)
@@ -623,32 +624,21 @@ def tab_trades() -> None:
                                     (_cat.isoformat() if _cat
                                      else datetime.now().isoformat(
                                          timespec="seconds")))
-                        st.session_state.pop(f"close_result_{t['id']}", None)
-                        _order_status.clear()
-                        st.rerun(scope="fragment")
-                    st.warning(
-                        f"⚠️ Closing order **{_cstat}**{_lim_txt} — it did not "
-                        "fill, so the position is still open. Reopen to try "
-                        "closing again.")
-                    _xc1, _xc2, _ = st.columns([2, 2, 3])
-                    with _xc1:
-                        # Pure local revert — the broker order is already
-                        # terminal, so no cancel call is needed.
-                        if st.button("Reopen — close again",
-                                     key=f"reopen_close_{t['id']}",
-                                     type="primary", width="stretch"):
-                            trades_store.update(t["id"], status="open",
-                                                close_order_id=None,
-                                                close_limit_px=None)
-                            st.session_state.pop(f"close_result_{t['id']}", None)
-                            _order_status.clear()
-                            st.rerun(scope="fragment")
-                    with _xc2:
-                        _rmbox = st.container(key=f"rm_box_{t['id']}")
-                        _rmbox.button("Remove from Tracker", key=f"rm_{t['id']}",
-                                      on_click=trades_store.remove,
-                                      args=(t["id"],), width="stretch")
-                    continue
+                        _note = (f"Closing order {_cstat} after filling "
+                                 f"{_filled_n} of {qty} — the rest is open "
+                                 "again.")
+                    else:
+                        # Nothing filled — revert the whole position to open.
+                        trades_store.update(t["id"], status="open",
+                                            close_order_id=None,
+                                            close_limit_px=None, close_qty=None)
+                        _note = (f"Closing order {_cstat} without filling — the "
+                                 "position is open again; place a new closing "
+                                 "order when ready.")
+                    st.session_state[f"close_note_{t['id']}"] = _note
+                    st.session_state.pop(f"close_result_{t['id']}", None)
+                    _order_status.clear()
+                    st.rerun(scope="fragment")
 
                 if _cstat:
                     st.caption(f"⏳ Closing order **{_cstat}**{_qty_txt}{_lim_txt}"
@@ -746,6 +736,11 @@ def tab_trades() -> None:
                     (st.success if _cres["ok"] else st.error)(
                         _cres["msg"].replace("$", "\\$"))
             elif _close_branch:
+                # One-time note when a closing order just terminated unfilled and
+                # the position was auto-reverted to open (see the closing block).
+                _cnote = st.session_state.pop(f"close_note_{t['id']}", None)
+                if _cnote:
+                    st.info(_cnote)
                 default_close = (trade_actions.ceil_to_tick(close_mid)
                                  if close_mid else 0.05)
                 # Re-seed the Close-limit field to the live mid whenever the
