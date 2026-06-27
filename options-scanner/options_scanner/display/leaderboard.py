@@ -513,6 +513,7 @@ def _investigate_put_body(c: dict, ticker_df: "pd.DataFrame | None" = None,
                 buy=False, ticker=c["ticker"],
                 key_prefix=f"inv_{c['ticker']}_{c['strike']:g}_{c['expiration']}",
                 min_vol=int(min_vol), provider=provider,
+                focus_contract=(float(c["strike"]), str(c["expiration"])),
             )
         except Exception:
             st.caption("IV chart unavailable for this contract.")

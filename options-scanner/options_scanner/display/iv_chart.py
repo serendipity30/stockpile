@@ -58,7 +58,8 @@ def show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
                   earnings_dates: list | None = None,
                   surface_filters: tuple | None = None,
                   df_full: pd.DataFrame | None = None,
-                  delta_range: tuple[float, float] | None = None) -> None:
+                  delta_range: tuple[float, float] | None = None,
+                  focus_contract: tuple[float, str] | None = None) -> None:
     """Layered chart: per-expiration smile with the table's top-N picks
     highlighted. Background dots are the rest of the chain at the selected
     expiration — filled if they anchored the surface fit, hollow if the
@@ -126,7 +127,12 @@ def show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
     }
     best_exps = {exp for (_, _, exp), r in top_ranks.items() if r == 1}
     picks_df = chart_df[chart_df["is_top"]]
-    if not picks_df.empty:
+    # A focused contract (e.g. the Sell Put dialog's put) wins the default so
+    # the chart opens on its expiration; otherwise default to the most extreme
+    # pick's expiration.
+    if focus_contract is not None and focus_contract[1] in expirations:
+        default_idx = expirations.index(focus_contract[1])
+    elif not picks_df.empty:
         extreme_idx = (picks_df["iv_excess"].idxmin() if buy
                        else picks_df["iv_excess"].idxmax())
         default_exp = picks_df.loc[extreme_idx, "expiration"]
@@ -440,12 +446,33 @@ def show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
                 )
                 shade_layers.append(shade)
 
+    # Focus marker: a gold ring + label around the specific contract in focus
+    # (e.g. the dialog's put), drawn only when it lives at the charted
+    # expiration and survived the display filters.
+    focus_layers = []
+    if focus_contract is not None and focus_contract[1] == chosen_exp:
+        _frow = sub[(sub["strike"] - float(focus_contract[0])).abs() < 1e-6]
+        if not _frow.empty:
+            _fword = {"call": "this call", "put": "this put"}.get(
+                mode, "this option")
+            _fdf = _frow.assign(_flabel=f"◆ {_fword}")
+            focus_layers = [
+                alt.Chart(_fdf).mark_point(
+                    size=640, filled=False, shape="circle",
+                    stroke="#f59e0b", strokeWidth=3.5,
+                ).encode(x=base_x, y=base_y),
+                alt.Chart(_fdf).mark_text(
+                    fontSize=12, fontWeight="bold", color="#b45309", dy=24,
+                ).encode(x=base_x, y=base_y, text="_flabel:N"),
+            ]
+
     type_word = {"call": "calls", "put": "puts", "both": "options"}[mode]
     title_text = (f"{ticker} {type_word} — {exp_labels[chosen_exp]}"
                   if ticker else f"{type_word} — {exp_labels[chosen_exp]}")
     chart = alt.layer(
         *shade_layers,
         line_surface, background, excluded, picks, ranks,
+        *focus_layers,
         spot_rule, spot_label,
     ).properties(
         height=380,
@@ -468,6 +495,11 @@ def show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
         " revealed by the toggle above."
         if show_all_fit and shade_layers else ""
     )
+    focus_note = (
+        "<br><span style='color:#f59e0b;font-size:1.1em'>&#9711;</span>"
+        " <b>Gold ring</b> = the contract you're investigating."
+        if focus_layers else ""
+    )
     st.markdown(
         "<div style='font-size:0.8rem;line-height:1.9;color:var(--osc-ink-3)'>"
         "<span style='color:#10b981'>&#9632;&#9632; &mdash; &mdash;</span>"
@@ -486,7 +518,7 @@ def show_iv_chart(df: pd.DataFrame, spot: float, mode: str,
         "<b>Large outlined dot + number</b> = top pick;"
         " number matches rank in table below (1&nbsp;=&nbsp;strongest signal)."
         " Vertical dashed line = current spot price."
-        + shade_note +
+        + shade_note + focus_note +
         "</div>",
         unsafe_allow_html=True,
     )
